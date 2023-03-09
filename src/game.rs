@@ -1,30 +1,70 @@
 use bevy::{prelude::*, render::camera::ScalingMode};
 
+use self::animation::AnimationPlugin;
 use self::archer::{Archer, ArcherElement, ArcherPlugin, Bow, TrajectoryReceiver};
 
+mod animation;
 mod archer;
 
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(ArcherPlugin)
-            .add_startup_system(setup_camera)
+        app.add_plugin(AnimationPlugin)
+            .add_plugin(ArcherPlugin)
+            .add_startup_system_set_to_stage(
+                StartupStage::PreStartup,
+                SystemSet::new()
+                    .with_system(setup_camera)
+                    .with_system(setup_resources),
+            )
             .add_startup_system(setup_trajectory)
             .add_system(trajectory_system)
             .add_system(trajectory_points_system);
     }
 }
 
+#[derive(Resource, Default)]
+struct GameTextures {
+    archer_blue_idle: Handle<TextureAtlas>,
+    // archer_blue_shooting_base: Handle<Image>,
+    // archer_blue_shooting_head: Handle<Image>,
+    // archer_blue_shooting_bow_arm: Handle<TextureAtlas>,
+    // archer_blue_shooting_pull_arm: Handle<TextureAtlas>,
+    // bow: Handle<TextureAtlas>,
+}
+
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle {
         projection: OrthographicProjection {
-            scaling_mode: ScalingMode::FixedVertical(9.0),
+            scaling_mode: ScalingMode::FixedVertical(12.0),
             scale: 1.0,
             ..Default::default()
         },
         ..Default::default()
     });
+}
+
+fn setup_resources(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+) {
+    let texture = asset_server.load("textures/archer_blue_idle.png");
+    let atlas = TextureAtlas::from_grid(texture, Vec2::new(64.0, 64.0), 2, 2, None, None);
+
+    let atlas_handle = texture_atlases.add(atlas);
+
+    let game_textures = GameTextures {
+        archer_blue_idle: atlas_handle,
+        // archer_blue_shooting_base: ,
+        // archer_blue_shooting_head: ,
+        // archer_blue_shooting_bow_arm: ,
+        // archer_blue_shooting_pull_arm: ,
+        // bow: ,
+    };
+
+    commands.insert_resource(game_textures);
 }
 
 #[derive(Component)]

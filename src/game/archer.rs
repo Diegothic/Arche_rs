@@ -2,6 +2,8 @@ use std::f32::consts::PI;
 
 use bevy::{prelude::*, sprite::Anchor};
 
+use super::{animation::Animation, animation::AnimationMode, GameTextures};
+
 pub struct ArcherPlugin;
 
 impl Plugin for ArcherPlugin {
@@ -46,7 +48,20 @@ pub struct TargetRotation {
 #[derive(Component)]
 pub struct TrajectoryReceiver;
 
-fn spawn_archer_system(mut commands: Commands) {
+fn spawn_archer_system(mut commands: Commands, game_textures: Res<GameTextures>) {
+    commands
+        .spawn(SpriteSheetBundle {
+            texture_atlas: game_textures.archer_blue_idle.clone(),
+            sprite: TextureAtlasSprite {
+                index: 0,
+                custom_size: Vec2::new(4.0, 4.0).into(),
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::splat(0.0)),
+            ..default()
+        })
+        .insert(Animation::new(0, 4, 1.0 / 2.0, AnimationMode::Automatic));
+
     commands
         .spawn(SpatialBundle {
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
