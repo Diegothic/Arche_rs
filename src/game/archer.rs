@@ -1,242 +1,445 @@
-use std::f32::consts::PI;
-
 use bevy::{prelude::*, sprite::Anchor};
 
-use super::{animation::Animation, animation::AnimationMode, GameTextures};
+use super::{
+    animation::Animation, animation::AnimationMode, player_controls::PlayerControls, GameTextures,
+    ROT_AXIS_Z,
+};
 
 pub struct ArcherPlugin;
 
 impl Plugin for ArcherPlugin {
     fn build(&self, app: &mut App) {
         app.add_startup_system(spawn_archer_system)
-            .add_system(target_rotation_system)
-            .add_system(archer_controll)
-            .add_system(archer_combat_limb_system);
+            .add_system(player_archer_update_system)
+            .add_system(archers_visibility_update_system)
+            .add_system(archers_look_at_target_update_system)
+            .add_system(archers_react_to_pull_update_system)
+            .add_system(archers_bow_update_system)
+            .add_system(archers_look_at_bow_update_system)
+            .add_system(archer_shooting_system)
+            .add_startup_system(setup_trajectory)
+            .add_system(trajectory_system)
+            .add_system(trajectory_points_update_system);
     }
 }
 
 #[derive(Component)]
 pub struct Archer {
-    pub id: u32,
-    pub aim_angle: f32,
-    pub bow_pull: f32,
+    is_active: bool,
+    is_combat: bool,
+    pull_angle: f32,
+    pull_power: f32,
+    shoot_arrow: bool,
+}
+
+impl Archer {
+    pub fn new() -> Self {
+        Self {
+            is_active: false,
+            is_combat: false,
+            pull_angle: 0.0,
+            pull_power: 0.0,
+            shoot_arrow: false,
+        }
+    }
 }
 
 #[derive(Component)]
-pub struct ArcherElement {
-    pub archer_id: u32,
+struct ArcherPlayer;
+
+#[derive(Component)]
+struct ArcherIdle;
+
+#[derive(Component)]
+struct ArcherComponent {
+    parent: Entity,
 }
 
 #[derive(Component)]
-pub struct CombatLimb;
+struct ReactToPull;
 
 #[derive(Component)]
-pub struct Bow;
+struct LookAtTarget;
 
-pub enum TargetRotationType {
-    Instant,
-    Smooth(f32),
+#[derive(Component)]
+struct Bow;
+
+#[derive(Component)]
+struct LookAtBow;
+
+#[derive(Component)]
+struct ShootingPoint;
+
+#[derive(Component)]
+struct ArrowTrajectory {
+    is_enabled: bool,
+    angle: f32,
+    power: f32,
 }
 
 #[derive(Component)]
-pub struct TargetRotation {
-    pub is_enabled: bool,
-    pub angle: f32,
-    pub rotation_type: TargetRotationType,
-}
+struct ArrowTrajectoryPoint;
 
 #[derive(Component)]
-pub struct TrajectoryReceiver;
+struct ArrowTrajectoryReceiver;
 
 fn spawn_archer_system(mut commands: Commands, game_textures: Res<GameTextures>) {
-    commands
+    let archer_player = commands
+        .spawn(SpatialBundle {
+            transform: Transform::from_translation(Vec3::ZERO),
+            ..default()
+        })
+        .insert(Archer::new())
+        .insert(ArcherPlayer)
+        .id();
+
+    let archer_idle = commands
         .spawn(SpriteSheetBundle {
             texture_atlas: game_textures.archer_blue_idle.clone(),
             sprite: TextureAtlasSprite {
                 index: 0,
                 custom_size: Vec2::new(4.0, 4.0).into(),
+                anchor: Anchor::BottomCenter,
                 ..default()
             },
-            transform: Transform::from_translation(Vec3::splat(0.0)),
+            transform: Transform::from_translation(Vec3::ZERO),
             ..default()
         })
-        .insert(Animation::new(0, 4, 1.0 / 2.0, AnimationMode::Automatic));
+        .insert(Animation::new(0, 4, 1.0 / 2.0, AnimationMode::Automatic))
+        .insert(ArcherIdle)
+        .insert(ArcherComponent {
+            parent: archer_player,
+        })
+        .id();
 
-    commands
-        .spawn(SpatialBundle {
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
-            ..Default::default()
+    let archer_combat = commands
+        .spawn(SpriteBundle {
+            texture: game_textures.archer_blue_body.clone(),
+            sprite: Sprite {
+                custom_size: Vec2::new(4.0, 4.0).into(),
+                anchor: Anchor::BottomCenter,
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.2)),
+            ..default()
+        })
+        .insert(ArcherComponent {
+            parent: archer_player,
         })
         .with_children(|parent| {
-            // Right Arm
             parent
                 .spawn(SpriteBundle {
+                    texture: game_textures.archer_blue_head.clone(),
                     sprite: Sprite {
-                        color: Color::rgb(0.8, 0.8, 0.8),
-                        custom_size: Vec2::new(0.7, 0.2).into(),
-                        anchor: Anchor::CenterLeft,
-                        ..Default::default()
+                        custom_size: Vec2::new(4.0, 4.0).into(),
+                        ..default()
                     },
-                    transform: Transform::from_translation(Vec3::new(0.25, 1.5, 1.0)),
-                    ..Default::default()
+                    transform: Transform::from_translation(Vec3::new(0.0, 2.4, 0.1)),
+                    ..default()
+                })
+                .insert(LookAtTarget)
+                .insert(ReactToPull)
+                .insert(ArcherComponent {
+                    parent: archer_player,
+                });
+
+            parent
+                .spawn(SpriteBundle {
+                    texture: game_textures.archer_blue_arm.clone(),
+                    sprite: Sprite {
+                        custom_size: Vec2::new(4.0, 4.0).into(),
+                        ..default()
+                    },
+                    transform: Transform::from_translation(Vec3::new(0.3, 2.1, -0.1)),
+                    ..default()
+                })
+                .insert(LookAtTarget)
+                .insert(ArcherComponent {
+                    parent: archer_player,
                 })
                 .with_children(|parent| {
                     parent
-                        .spawn(SpriteBundle {
-                            sprite: Sprite {
-                                color: Color::rgb(0.2, 0.2, 1.0),
-                                custom_size: Vec2::new(0.25, 1.0).into(),
-                                anchor: Anchor::CenterRight,
-                                ..Default::default()
+                        .spawn(SpriteSheetBundle {
+                            texture_atlas: game_textures.archer_bow.clone(),
+                            sprite: TextureAtlasSprite {
+                                index: 0,
+                                custom_size: Vec2::new(4.0, 4.0).into(),
+                                ..default()
                             },
-                            transform: Transform::from_translation(Vec3::new(0.7, 0.0, 10.0)),
-                            ..Default::default()
+                            transform: Transform::from_translation(Vec3::new(1.3, 0.0, 0.2)),
+                            ..default()
                         })
-                        .insert((ArcherElement { archer_id: 0 }, Bow));
-                })
-                .insert((
-                    ArcherElement { archer_id: 0 },
-                    CombatLimb,
-                    TargetRotation {
-                        is_enabled: true,
-                        angle: 0.0,
-                        rotation_type: TargetRotationType::Smooth(4.0),
+                        .insert(Animation::new(0, 5, 1.0 / 8.0, AnimationMode::Manual))
+                        .insert(ReactToPull)
+                        .insert(ArcherComponent {
+                            parent: archer_player,
+                        })
+                        .with_children(|parent| {
+                            parent
+                                .spawn(TransformBundle {
+                                    local: Transform::from_translation(Vec3::ZERO),
+                                    ..default()
+                                })
+                                .insert(Bow)
+                                .insert(ArcherComponent {
+                                    parent: archer_player,
+                                });
+
+                            parent
+                                .spawn(TransformBundle {
+                                    local: Transform::from_translation(Vec3::new(1.25, 0.0, 0.0)),
+                                    ..default()
+                                })
+                                .insert(ShootingPoint)
+                                .insert(ArcherComponent {
+                                    parent: archer_player,
+                                })
+                                .insert(ArrowTrajectoryReceiver);
+                        });
+                });
+
+            parent
+                .spawn(SpriteSheetBundle {
+                    texture_atlas: game_textures.archer_blue_arm_pull.clone(),
+                    sprite: TextureAtlasSprite {
+                        index: 0,
+                        custom_size: Vec2::new(4.0, 4.0).into(),
+                        ..default()
                     },
-                ));
-
-            // Left Arm
-            parent.spawn(SpriteBundle {
-                sprite: Sprite {
-                    color: Color::rgb(0.8, 0.8, 0.8),
-                    custom_size: Vec2::new(0.7, 0.2).into(),
-                    anchor: Anchor::CenterRight,
-                    ..Default::default()
-                },
-                transform: Transform::from_translation(Vec3::new(-0.25, 1.5, 2.0)),
-                ..Default::default()
-            });
-
-            // Head
-            parent.spawn(SpriteBundle {
-                sprite: Sprite {
-                    color: Color::rgb(0.9, 0.9, 0.9),
-                    custom_size: Vec2::new(0.3, 0.3).into(),
-                    ..Default::default()
-                },
-                transform: Transform::from_translation(Vec3::new(0.0, 1.65, 0.0)),
-                ..Default::default()
-            });
-
-            // Torso
-            parent.spawn(SpriteBundle {
-                sprite: Sprite {
-                    color: Color::rgb(0.7, 0.7, 0.7),
-                    custom_size: Vec2::new(0.5, 0.7).into(),
-                    ..Default::default()
-                },
-                transform: Transform::from_translation(Vec3::new(0.0, 1.15, 0.0)),
-                ..Default::default()
-            });
-
-            // Legs
-            parent.spawn(SpriteBundle {
-                sprite: Sprite {
-                    color: Color::rgb(0.6, 0.6, 0.6),
-                    custom_size: Vec2::new(0.5, 0.8).into(),
-                    ..Default::default()
-                },
-                transform: Transform::from_translation(Vec3::new(0.0, 0.4, 0.0)),
-                ..Default::default()
-            });
+                    transform: Transform::from_translation(Vec3::new(-0.45, 2.1, 0.2)),
+                    ..default()
+                })
+                .insert(LookAtBow)
+                .insert(Animation::new(0, 5, 1.0 / 8.0, AnimationMode::Manual))
+                .insert(ReactToPull)
+                .insert(ArcherComponent {
+                    parent: archer_player,
+                });
         })
-        .insert((
-            Archer {
-                id: 0,
-                aim_angle: 0.0,
-                bow_pull: 0.0,
-            },
-            TrajectoryReceiver,
-        ));
+        .id();
+
+    commands
+        .entity(archer_player)
+        .push_children(&[archer_idle, archer_combat]);
 }
 
-fn archer_controll(time: Res<Time>, keyboard: Res<Input<KeyCode>>, mut query: Query<&mut Archer>) {
-    for mut archer in query.iter_mut() {
-        if keyboard.pressed(KeyCode::Up) {
-            archer.aim_angle += 5.0 * time.delta_seconds();
-        }
-
-        if keyboard.pressed(KeyCode::Down) {
-            archer.aim_angle -= 5.0 * time.delta_seconds();
-        }
-
-        if archer.aim_angle <= -PI {
-            archer.aim_angle += 2.0 * PI;
-        }
-
-        if archer.aim_angle >= PI {
-            archer.aim_angle -= 2.0 * PI;
-        }
-
-        if keyboard.pressed(KeyCode::Left) {
-            archer.bow_pull += 2.0 * time.delta_seconds();
-        }
-
-        if keyboard.pressed(KeyCode::Right) {
-            archer.bow_pull -= 2.0 * time.delta_seconds();
-        }
-
-        archer.bow_pull = f32::clamp(archer.bow_pull, 0.0, 1.0);
-    }
-}
-
-fn archer_combat_limb_system(
-    mut query: Query<(&mut TargetRotation, &ArcherElement), With<CombatLimb>>,
-    query_archer: Query<&Archer>,
+fn player_archer_update_system(
+    player_controls: Res<PlayerControls>,
+    mut archers: Query<&mut Archer, With<ArcherPlayer>>,
 ) {
-    for (mut target_rotation, element) in query.iter_mut() {
-        let mut found_archer: Option<&Archer> = Option::None;
-        for archer in query_archer.iter() {
-            if archer.id == element.archer_id {
-                found_archer = Option::Some(archer);
-                break;
-            }
-        }
-        if let Some(archer) = found_archer {
-            target_rotation.angle = archer.aim_angle;
-        }
-    }
-}
-
-fn target_rotation_system(time: Res<Time>, mut query: Query<(&mut Transform, &TargetRotation)>) {
-    for (mut transform, target_rotation) in query.iter_mut() {
-        if !target_rotation.is_enabled {
+    for mut archer in archers.iter_mut() {
+        if !player_controls.enabled() {
+            archer.is_active = false;
+            archer.is_combat = false;
             continue;
         }
 
-        let rot_z = transform.rotation.to_euler(EulerRot::XYZ).2;
-        let desired_rot_z = target_rotation.angle;
-        let mut new_rot = rot_z;
-        match target_rotation.rotation_type {
-            TargetRotationType::Instant => {
-                new_rot = desired_rot_z;
-            }
-            TargetRotationType::Smooth(speed) => {
-                let rot_delta = speed * time.delta_seconds();
-                let rot_diff = f32::abs(desired_rot_z - rot_z);
-                let rot_diff_comp = (2.0 * PI) - rot_diff;
-                if rot_diff < 0.01 {
-                    new_rot = desired_rot_z;
-                } else {
-                    let mut direction = if rot_z < desired_rot_z { 1.0 } else { -1.0 };
-                    if rot_diff_comp < rot_diff {
-                        direction *= -1.0;
-                    }
+        archer.is_combat = player_controls.aiming();
+        if archer.is_combat {
+            let min_angle = f32::to_radians(-60.0);
+            let max_angle = f32::to_radians(60.0);
+            let controls_angle = player_controls.angle();
+            let angle_out_of_bounds = controls_angle > max_angle || controls_angle < min_angle;
+            let angle = if angle_out_of_bounds {
+                0.0
+            } else {
+                controls_angle.clamp(min_angle, max_angle)
+            };
+            archer.pull_angle = angle;
+            let pull = if angle_out_of_bounds {
+                0.0
+            } else {
+                player_controls.percent()
+            };
+            archer.pull_power = pull;
+        } else {
+            archer.pull_angle = 0.0;
+            archer.pull_power = 0.0;
+        }
 
-                    new_rot += rot_delta * direction;
+        if player_controls.should_shoot_arrow() {
+            archer.shoot_arrow = true;
+        }
+    }
+}
+
+fn archers_visibility_update_system(
+    archers: Query<&Archer>,
+    mut archer_idles: Query<(&ArcherComponent, &mut Visibility), With<ArcherIdle>>,
+    mut archer_combats: Query<(&ArcherComponent, &mut Visibility), Without<ArcherIdle>>,
+) {
+    for (archer_component, mut visibility) in archer_idles.iter_mut() {
+        if let Ok(archer) = archers.get(archer_component.parent) {
+            visibility.is_visible = !archer.is_combat;
+        }
+    }
+
+    for (archer_component, mut visibility) in archer_combats.iter_mut() {
+        if let Ok(archer) = archers.get(archer_component.parent) {
+            visibility.is_visible = archer.is_combat;
+        }
+    }
+}
+
+fn archers_look_at_target_update_system(
+    archers: Query<&Archer>,
+    mut look_at_targets: Query<(&ArcherComponent, &mut Transform), With<LookAtTarget>>,
+) {
+    for (archer_component, mut transform) in look_at_targets.iter_mut() {
+        if let Ok(archer) = archers.get(archer_component.parent) {
+            if !archer.is_combat {
+                continue;
+            }
+
+            transform.rotation = Quat::from_axis_angle(ROT_AXIS_Z, archer.pull_angle);
+        }
+    }
+}
+
+fn archers_react_to_pull_update_system(
+    archers: Query<&Archer>,
+    mut pull_reactors: Query<(&ArcherComponent, &mut Animation), With<ReactToPull>>,
+) {
+    for (archer_component, mut animation) in pull_reactors.iter_mut() {
+        if let Ok(archer) = archers.get(archer_component.parent) {
+            if !archer.is_combat {
+                continue;
+            }
+
+            animation.set_progress(archer.pull_power);
+        }
+    }
+}
+
+fn archers_bow_update_system(
+    archers: Query<&Archer>,
+    mut bows: Query<(&ArcherComponent, &mut Transform), With<Bow>>,
+) {
+    for (archer_component, mut transform) in bows.iter_mut() {
+        if let Ok(archer) = archers.get(archer_component.parent) {
+            transform.translation = Vec3::new(-(0.5 + archer.pull_power * 0.9), 0.0, 0.0);
+        }
+    }
+}
+
+fn archers_look_at_bow_update_system(
+    archers: Query<&Archer>,
+    bows: Query<(&ArcherComponent, &GlobalTransform), With<Bow>>,
+    mut look_at_bows: Query<(&ArcherComponent, &mut Transform), With<LookAtBow>>,
+) {
+    for (archer_component, mut transform) in look_at_bows.iter_mut() {
+        if let Ok(archer) = archers.get(archer_component.parent) {
+            if !archer.is_combat {
+                continue;
+            }
+
+            for (bow_archer_component, bow_global_transform) in bows.iter() {
+                if bow_archer_component.parent == archer_component.parent {
+                    let look_target = bow_global_transform.translation();
+                    let diff = look_target - transform.translation;
+                    let angle = f32::atan2(diff.y, diff.x);
+                    transform.rotation = Quat::from_axis_angle(ROT_AXIS_Z, angle);
                 }
             }
         }
+    }
+}
 
-        transform.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, new_rot);
+fn archer_shooting_system(
+    mut commands: Commands,
+    mut archers: Query<&mut Archer>,
+    shooting_points: Query<(&ArcherComponent, &GlobalTransform), With<ShootingPoint>>,
+) {
+    for (archer_component, transform) in shooting_points.iter() {
+        if let Ok(mut archer) = archers.get_mut(archer_component.parent) {
+            if archer.shoot_arrow {
+                archer.shoot_arrow = false;
+                // TODO: Spawn arrow here
+                commands.spawn(SpriteBundle {
+                    sprite: Sprite {
+                        color: Color::BLUE,
+                        custom_size: Vec2::new(0.2, 0.2).into(),
+                        ..default()
+                    },
+                    transform: Transform::from_translation(transform.translation()),
+                    ..default()
+                });
+            }
+        }
+    }
+}
+
+fn setup_trajectory(mut commands: Commands) {
+    commands
+        .spawn(SpatialBundle::default())
+        .insert(ArrowTrajectory {
+            is_enabled: false,
+            angle: 0.0,
+            power: 0.0,
+        })
+        .with_children(|parent| {
+            for _ in 0..=40 {
+                parent
+                    .spawn(SpriteBundle {
+                        transform: Transform::from_scale(Vec3::splat(0.3)),
+                        ..Default::default()
+                    })
+                    .insert(ArrowTrajectoryPoint);
+            }
+        });
+}
+
+fn trajectory_system(
+    archers: Query<&Archer>,
+    trajectory_receivers: Query<
+        (&ArcherComponent, &GlobalTransform),
+        With<ArrowTrajectoryReceiver>,
+    >,
+    mut trajectories: Query<(&mut ArrowTrajectory, &mut Transform, &mut Visibility)>,
+) {
+    let (mut trajectory, mut transform, mut visibility) = trajectories.single_mut();
+    let (receiver_component, receiver_transform) = trajectory_receivers.single();
+    if let Ok(archer) = archers.get(receiver_component.parent) {
+        if !archer.is_combat {
+            trajectory.is_enabled = false;
+            visibility.is_visible = false;
+            trajectory.angle = 0.0;
+            trajectory.power = 0.0;
+            return;
+        }
+
+        if !trajectory.is_enabled {
+            trajectory.is_enabled = true;
+            visibility.is_visible = true;
+        }
+
+        transform.translation = receiver_transform.translation();
+        trajectory.angle = archer.pull_angle;
+        trajectory.power = archer.pull_power * 10.0;
+    }
+}
+
+fn trajectory_points_update_system(
+    trajectories: Query<&ArrowTrajectory>,
+    mut trajectory_points: Query<&mut Transform, With<ArrowTrajectoryPoint>>,
+) {
+    if let Ok(trajectory) = trajectories.get_single() {
+        if !trajectory.is_enabled {
+            return;
+        }
+
+        let mut t: f32 = 0.0;
+        let t_delta = 0.01;
+        for mut transform in trajectory_points.iter_mut() {
+            let x: f32 = trajectory.power * t * f32::cos(trajectory.angle);
+            let mut y: f32 = trajectory.power * t * f32::sin(trajectory.angle);
+            y -= 0.5 * 9.0 * t * t;
+
+            transform.translation.x = x;
+            transform.translation.y = y;
+            transform.translation.z = 5.0;
+            transform.scale = Vec3::splat(((1.0 - (t / t_delta / 50.0)) / 20.0) + 0.01);
+            t += t_delta;
+        }
     }
 }

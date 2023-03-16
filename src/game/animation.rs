@@ -53,6 +53,9 @@ impl Animation {
 
     pub fn set_progress(&mut self, mut progress: f32) {
         progress = progress.clamp(0.0, 1.0);
+        let single_frame = 1.0 / (self.last_index) as f32;
+        let progress_frame = (progress / single_frame).floor().abs() as usize;
+        self.current_frame = progress_frame;
     }
 }
 
@@ -66,7 +69,9 @@ fn sprite_animation_system(
                 animation.advance(time.delta_seconds());
                 sprite.index = animation.current_frame;
             }
-            AnimationMode::Manual => (),
+            AnimationMode::Manual => {
+                sprite.index = animation.current_frame;
+            }
         }
     }
 }

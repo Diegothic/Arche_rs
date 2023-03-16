@@ -1,48 +1,55 @@
 use bevy::{prelude::*, render::camera::ScalingMode};
 
 use self::animation::AnimationPlugin;
-use self::archer::{Archer, ArcherElement, ArcherPlugin, Bow, TrajectoryReceiver};
+use self::archer::ArcherPlugin;
+use self::player_controls::PlayerControlsPlugin;
 
 mod animation;
 mod archer;
+mod player_controls;
+
+const ROT_AXIS_Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(AnimationPlugin)
+            .add_plugin(PlayerControlsPlugin)
             .add_plugin(ArcherPlugin)
             .add_startup_system_set_to_stage(
                 StartupStage::PreStartup,
                 SystemSet::new()
                     .with_system(setup_camera)
                     .with_system(setup_resources),
-            )
-            .add_startup_system(setup_trajectory)
-            .add_system(trajectory_system)
-            .add_system(trajectory_points_system);
+            );
     }
 }
 
 #[derive(Resource, Default)]
 struct GameTextures {
     archer_blue_idle: Handle<TextureAtlas>,
-    // archer_blue_shooting_base: Handle<Image>,
-    // archer_blue_shooting_head: Handle<Image>,
-    // archer_blue_shooting_bow_arm: Handle<TextureAtlas>,
-    // archer_blue_shooting_pull_arm: Handle<TextureAtlas>,
-    // bow: Handle<TextureAtlas>,
+    archer_blue_body: Handle<Image>,
+    archer_blue_head: Handle<Image>,
+    archer_blue_arm: Handle<Image>,
+    archer_blue_arm_pull: Handle<TextureAtlas>,
+    archer_bow: Handle<TextureAtlas>,
 }
 
+#[derive(Component)]
+struct MainCamera;
+
 fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2dBundle {
-        projection: OrthographicProjection {
-            scaling_mode: ScalingMode::FixedVertical(12.0),
-            scale: 1.0,
+    commands
+        .spawn(Camera2dBundle {
+            projection: OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical(12.0),
+                scale: 1.0,
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert(MainCamera);
 }
 
 fn setup_resources(
@@ -52,89 +59,30 @@ fn setup_resources(
 ) {
     let texture = asset_server.load("textures/archer_blue_idle.png");
     let atlas = TextureAtlas::from_grid(texture, Vec2::new(64.0, 64.0), 2, 2, None, None);
+    let archer_blue_idle_atlas_handle = texture_atlases.add(atlas);
 
-    let atlas_handle = texture_atlases.add(atlas);
+    let archer_blue_body_texture = asset_server.load("textures/archer_blue_body.png");
+
+    let archer_blue_head_texture = asset_server.load("textures/archer_blue_head.png");
+
+    let archer_blue_arm_texture = asset_server.load("textures/archer_blue_arm.png");
+
+    let texture = asset_server.load("textures/archer_blue_arm_pull.png");
+    let atlas = TextureAtlas::from_grid(texture, Vec2::new(64.0, 64.0), 3, 2, None, None);
+    let archer_blue_arm_pull_atlas_handle = texture_atlases.add(atlas);
+
+    let texture = asset_server.load("textures/archer_bow.png");
+    let atlas = TextureAtlas::from_grid(texture, Vec2::new(64.0, 64.0), 3, 2, None, None);
+    let archer_bow_atlas_handle = texture_atlases.add(atlas);
 
     let game_textures = GameTextures {
-        archer_blue_idle: atlas_handle,
-        // archer_blue_shooting_base: ,
-        // archer_blue_shooting_head: ,
-        // archer_blue_shooting_bow_arm: ,
-        // archer_blue_shooting_pull_arm: ,
-        // bow: ,
+        archer_blue_idle: archer_blue_idle_atlas_handle,
+        archer_blue_body: archer_blue_body_texture,
+        archer_blue_head: archer_blue_head_texture,
+        archer_blue_arm: archer_blue_arm_texture,
+        archer_blue_arm_pull: archer_blue_arm_pull_atlas_handle,
+        archer_bow: archer_bow_atlas_handle,
     };
 
     commands.insert_resource(game_textures);
-}
-
-#[derive(Component)]
-struct Trajectory {
-    angle: f32,
-    power: f32,
-}
-
-#[derive(Component)]
-struct TrajectoryPoint;
-
-fn trajectory_system(
-    mut query: Query<(&mut Transform, &mut Trajectory)>,
-    query_archer: Query<&Archer, With<TrajectoryReceiver>>,
-    query_bow: Query<(&GlobalTransform, &ArcherElement), With<Bow>>,
-) {
-    if let Ok((mut transform, mut trajectory)) = query.get_single_mut() {
-        if let Ok(archer) = query_archer.get_single() {
-            let mut found_transform: Option<&GlobalTransform> = Option::None;
-            for (transform, element) in query_bow.iter() {
-                if element.archer_id == archer.id {
-                    found_transform = Some(transform);
-                }
-            }
-
-            if let Some(bow_transform) = found_transform {
-                transform.translation = bow_transform.translation();
-                trajectory.angle = archer.aim_angle;
-                trajectory.power = archer.bow_pull * 28.0 + 2.0;
-            }
-        }
-    }
-}
-
-fn trajectory_points_system(
-    query_trajectory: Query<&Trajectory>,
-    mut query: Query<&mut Transform, With<TrajectoryPoint>>,
-) {
-    if let Ok(trajectory) = query_trajectory.get_single() {
-        let mut t: f32 = 0.0;
-        let t_delta = 1.0 / (trajectory.power * 10.0);
-        for mut transform in query.iter_mut() {
-            let x: f32 = trajectory.power * t * f32::cos(trajectory.angle);
-            let mut y: f32 = trajectory.power * t * f32::sin(trajectory.angle);
-            y -= 0.5 * 9.0 * t * t;
-
-            transform.translation.x = x;
-            transform.translation.y = y;
-            transform.translation.z = 5.0;
-            transform.scale = Vec3::splat(((1.0 - (t / t_delta / 50.0)) / 20.0) + 0.01);
-            t += t_delta;
-        }
-    }
-}
-
-fn setup_trajectory(mut commands: Commands) {
-    commands
-        .spawn(SpatialBundle::default())
-        .insert(Trajectory {
-            angle: 0.0,
-            power: 1.0,
-        })
-        .with_children(|parent| {
-            for _ in 0..=50 {
-                parent
-                    .spawn(SpriteBundle {
-                        transform: Transform::from_scale(Vec3::splat(0.3)),
-                        ..Default::default()
-                    })
-                    .insert(TrajectoryPoint);
-            }
-        });
 }
