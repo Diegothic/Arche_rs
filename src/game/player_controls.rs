@@ -27,6 +27,7 @@ pub struct PlayerControls {
     max_distance: f32,
     can_shot_arrow: bool,
     has_shot_arrow: bool,
+    indicator_color: Color,
 }
 
 impl PlayerControls {
@@ -34,6 +35,7 @@ impl PlayerControls {
         Self {
             is_enabled,
             max_distance,
+            indicator_color: Color::WHITE,
             ..default()
         }
     }
@@ -62,6 +64,10 @@ impl PlayerControls {
     pub fn reset_shooting(&mut self) {
         self.can_shot_arrow = true;
         self.has_shot_arrow = false;
+    }
+
+    pub fn set_indicator_color(&mut self, new_color: Color) {
+        self.indicator_color = new_color;
     }
 }
 
@@ -153,8 +159,10 @@ fn player_controls_indicator_update_system(
         }
 
         transform.translation = player_controls.hook_pos;
+        transform.translation.z = 2.0;
         transform.rotation = Quat::from_axis_angle(ROT_AXIS_Z, player_controls.angle());
         sprite.custom_size = Vec2::new(player_controls.distance, 0.05).into();
+        sprite.color = player_controls.indicator_color;
         sprite.color.set_a(1.0);
     }
 }

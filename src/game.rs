@@ -2,10 +2,12 @@ use bevy::{prelude::*, render::camera::ScalingMode};
 
 use self::animation::AnimationPlugin;
 use self::archer::ArcherPlugin;
+use self::arrow::ArrowPlugin;
 use self::player_controls::PlayerControlsPlugin;
 
 mod animation;
 mod archer;
+mod arrow;
 mod player_controls;
 
 const ROT_AXIS_Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
@@ -17,6 +19,7 @@ impl Plugin for GamePlugin {
         app.add_plugin(AnimationPlugin)
             .add_plugin(PlayerControlsPlugin)
             .add_plugin(ArcherPlugin)
+            .add_plugin(ArrowPlugin)
             .add_startup_system_set_to_stage(
                 StartupStage::PreStartup,
                 SystemSet::new()
@@ -34,6 +37,7 @@ struct GameTextures {
     archer_blue_arm: Handle<Image>,
     archer_blue_arm_pull: Handle<TextureAtlas>,
     archer_bow: Handle<TextureAtlas>,
+    archer_arrow: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -43,7 +47,7 @@ fn setup_camera(mut commands: Commands) {
     commands
         .spawn(Camera2dBundle {
             projection: OrthographicProjection {
-                scaling_mode: ScalingMode::FixedVertical(12.0),
+                scaling_mode: ScalingMode::FixedVertical(18.0),
                 scale: 1.0,
                 ..Default::default()
             },
@@ -75,6 +79,8 @@ fn setup_resources(
     let atlas = TextureAtlas::from_grid(texture, Vec2::new(64.0, 64.0), 3, 2, None, None);
     let archer_bow_atlas_handle = texture_atlases.add(atlas);
 
+    let archer_arrow_texture = asset_server.load("textures/archer_arrow.png");
+
     let game_textures = GameTextures {
         archer_blue_idle: archer_blue_idle_atlas_handle,
         archer_blue_body: archer_blue_body_texture,
@@ -82,6 +88,7 @@ fn setup_resources(
         archer_blue_arm: archer_blue_arm_texture,
         archer_blue_arm_pull: archer_blue_arm_pull_atlas_handle,
         archer_bow: archer_bow_atlas_handle,
+        archer_arrow: archer_arrow_texture,
     };
 
     commands.insert_resource(game_textures);

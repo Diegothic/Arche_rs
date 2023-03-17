@@ -1,8 +1,8 @@
 use bevy::{prelude::*, sprite::Anchor};
 
 use super::{
-    animation::Animation, animation::AnimationMode, player_controls::PlayerControls, GameTextures,
-    ROT_AXIS_Z,
+    animation::Animation, animation::AnimationMode, arrow::Arrow, player_controls::PlayerControls,
+    GameTextures, ROT_AXIS_Z,
 };
 
 pub struct ArcherPlugin;
@@ -86,145 +86,159 @@ struct ArrowTrajectoryReceiver;
 fn spawn_archer_system(mut commands: Commands, game_textures: Res<GameTextures>) {
     let archer_player = commands
         .spawn(SpatialBundle {
-            transform: Transform::from_translation(Vec3::ZERO),
+            transform: Transform::from_translation(Vec3::new(-12.0, -2.0, 0.0)),
             ..default()
         })
         .insert(Archer::new())
         .insert(ArcherPlayer)
         .id();
 
-    let archer_idle = commands
-        .spawn(SpriteSheetBundle {
-            texture_atlas: game_textures.archer_blue_idle.clone(),
-            sprite: TextureAtlasSprite {
-                index: 0,
-                custom_size: Vec2::new(4.0, 4.0).into(),
-                anchor: Anchor::BottomCenter,
-                ..default()
-            },
-            transform: Transform::from_translation(Vec3::ZERO),
-            ..default()
-        })
-        .insert(Animation::new(0, 4, 1.0 / 2.0, AnimationMode::Automatic))
-        .insert(ArcherIdle)
-        .insert(ArcherComponent {
-            parent: archer_player,
-        })
-        .id();
-
-    let archer_combat = commands
-        .spawn(SpriteBundle {
-            texture: game_textures.archer_blue_body.clone(),
-            sprite: Sprite {
-                custom_size: Vec2::new(4.0, 4.0).into(),
-                anchor: Anchor::BottomCenter,
-                ..default()
-            },
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.2)),
-            ..default()
-        })
-        .insert(ArcherComponent {
-            parent: archer_player,
-        })
-        .with_children(|parent| {
-            parent
-                .spawn(SpriteBundle {
-                    texture: game_textures.archer_blue_head.clone(),
-                    sprite: Sprite {
-                        custom_size: Vec2::new(4.0, 4.0).into(),
-                        ..default()
-                    },
-                    transform: Transform::from_translation(Vec3::new(0.0, 2.4, 0.1)),
+    let mut spawn_archer = |parent_archer: Entity, receive_trajectory: bool| {
+        let archer_idle = commands
+            .spawn(SpriteSheetBundle {
+                texture_atlas: game_textures.archer_blue_idle.clone(),
+                sprite: TextureAtlasSprite {
+                    index: 0,
+                    custom_size: Vec2::new(4.0, 4.0).into(),
+                    anchor: Anchor::BottomCenter,
                     ..default()
-                })
-                .insert(LookAtTarget)
-                .insert(ReactToPull)
-                .insert(ArcherComponent {
-                    parent: archer_player,
-                });
+                },
+                transform: Transform::from_translation(Vec3::ZERO),
+                ..default()
+            })
+            .insert(Animation::new(0, 4, 1.0 / 2.0, AnimationMode::Automatic))
+            .insert(ArcherIdle)
+            .insert(ArcherComponent {
+                parent: parent_archer,
+            })
+            .id();
 
-            parent
-                .spawn(SpriteBundle {
-                    texture: game_textures.archer_blue_arm.clone(),
-                    sprite: Sprite {
-                        custom_size: Vec2::new(4.0, 4.0).into(),
-                        ..default()
-                    },
-                    transform: Transform::from_translation(Vec3::new(0.3, 2.1, -0.1)),
+        let mut shooting_point: Option<Entity> = None;
+        let archer_combat = commands
+            .spawn(SpriteBundle {
+                texture: game_textures.archer_blue_body.clone(),
+                sprite: Sprite {
+                    custom_size: Vec2::new(4.0, 4.0).into(),
+                    anchor: Anchor::BottomCenter,
                     ..default()
-                })
-                .insert(LookAtTarget)
-                .insert(ArcherComponent {
-                    parent: archer_player,
-                })
-                .with_children(|parent| {
-                    parent
-                        .spawn(SpriteSheetBundle {
-                            texture_atlas: game_textures.archer_bow.clone(),
-                            sprite: TextureAtlasSprite {
-                                index: 0,
-                                custom_size: Vec2::new(4.0, 4.0).into(),
-                                ..default()
-                            },
-                            transform: Transform::from_translation(Vec3::new(1.3, 0.0, 0.2)),
+                },
+                transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.2)),
+                ..default()
+            })
+            .insert(ArcherComponent {
+                parent: parent_archer,
+            })
+            .with_children(|parent| {
+                parent
+                    .spawn(SpriteBundle {
+                        texture: game_textures.archer_blue_head.clone(),
+                        sprite: Sprite {
+                            custom_size: Vec2::new(4.0, 4.0).into(),
                             ..default()
-                        })
-                        .insert(Animation::new(0, 5, 1.0 / 8.0, AnimationMode::Manual))
-                        .insert(ReactToPull)
-                        .insert(ArcherComponent {
-                            parent: archer_player,
-                        })
-                        .with_children(|parent| {
-                            parent
-                                .spawn(TransformBundle {
-                                    local: Transform::from_translation(Vec3::ZERO),
-                                    ..default()
-                                })
-                                .insert(Bow)
-                                .insert(ArcherComponent {
-                                    parent: archer_player,
-                                });
-
-                            parent
-                                .spawn(TransformBundle {
-                                    local: Transform::from_translation(Vec3::new(1.25, 0.0, 0.0)),
-                                    ..default()
-                                })
-                                .insert(ShootingPoint)
-                                .insert(ArcherComponent {
-                                    parent: archer_player,
-                                })
-                                .insert(ArrowTrajectoryReceiver);
-                        });
-                });
-
-            parent
-                .spawn(SpriteSheetBundle {
-                    texture_atlas: game_textures.archer_blue_arm_pull.clone(),
-                    sprite: TextureAtlasSprite {
-                        index: 0,
-                        custom_size: Vec2::new(4.0, 4.0).into(),
+                        },
+                        transform: Transform::from_translation(Vec3::new(0.0, 2.4, 0.1)),
                         ..default()
-                    },
-                    transform: Transform::from_translation(Vec3::new(-0.45, 2.1, 0.2)),
-                    ..default()
-                })
-                .insert(LookAtBow)
-                .insert(Animation::new(0, 5, 1.0 / 8.0, AnimationMode::Manual))
-                .insert(ReactToPull)
-                .insert(ArcherComponent {
-                    parent: archer_player,
-                });
-        })
-        .id();
+                    })
+                    .insert(LookAtTarget)
+                    .insert(ReactToPull)
+                    .insert(ArcherComponent {
+                        parent: parent_archer,
+                    });
 
-    commands
-        .entity(archer_player)
-        .push_children(&[archer_idle, archer_combat]);
+                parent
+                    .spawn(SpriteBundle {
+                        texture: game_textures.archer_blue_arm.clone(),
+                        sprite: Sprite {
+                            custom_size: Vec2::new(4.0, 4.0).into(),
+                            ..default()
+                        },
+                        transform: Transform::from_translation(Vec3::new(0.3, 2.1, -0.1)),
+                        ..default()
+                    })
+                    .insert(LookAtTarget)
+                    .insert(ArcherComponent {
+                        parent: parent_archer,
+                    })
+                    .with_children(|parent| {
+                        parent
+                            .spawn(SpriteSheetBundle {
+                                texture_atlas: game_textures.archer_bow.clone(),
+                                sprite: TextureAtlasSprite {
+                                    index: 0,
+                                    custom_size: Vec2::new(4.0, 4.0).into(),
+                                    ..default()
+                                },
+                                transform: Transform::from_translation(Vec3::new(1.3, 0.0, 0.2)),
+                                ..default()
+                            })
+                            .insert(Animation::new(0, 5, 1.0 / 8.0, AnimationMode::Manual))
+                            .insert(ReactToPull)
+                            .insert(ArcherComponent {
+                                parent: parent_archer,
+                            })
+                            .with_children(|parent| {
+                                parent
+                                    .spawn(TransformBundle {
+                                        local: Transform::from_translation(Vec3::ZERO),
+                                        ..default()
+                                    })
+                                    .insert(Bow)
+                                    .insert(ArcherComponent {
+                                        parent: parent_archer,
+                                    });
+
+                                shooting_point = parent
+                                    .spawn(TransformBundle {
+                                        local: Transform::from_translation(Vec3::new(
+                                            1.25, 0.0, 0.0,
+                                        )),
+                                        ..default()
+                                    })
+                                    .insert(ShootingPoint)
+                                    .insert(ArcherComponent {
+                                        parent: parent_archer,
+                                    })
+                                    .id()
+                                    .into();
+                            });
+                    });
+
+                parent
+                    .spawn(SpriteSheetBundle {
+                        texture_atlas: game_textures.archer_blue_arm_pull.clone(),
+                        sprite: TextureAtlasSprite {
+                            index: 0,
+                            custom_size: Vec2::new(4.0, 4.0).into(),
+                            ..default()
+                        },
+                        transform: Transform::from_translation(Vec3::new(-0.45, 2.1, 0.2)),
+                        ..default()
+                    })
+                    .insert(LookAtBow)
+                    .insert(Animation::new(0, 5, 1.0 / 8.0, AnimationMode::Manual))
+                    .insert(ReactToPull)
+                    .insert(ArcherComponent {
+                        parent: parent_archer,
+                    });
+            })
+            .id();
+
+        if let Some(entity) = shooting_point {
+            if receive_trajectory {
+                commands.entity(entity).insert(ArrowTrajectoryReceiver);
+            }
+        }
+
+        commands
+            .entity(parent_archer)
+            .push_children(&[archer_idle, archer_combat]);
+    };
+
+    spawn_archer(archer_player, true);
 }
 
 fn player_archer_update_system(
-    player_controls: Res<PlayerControls>,
+    mut player_controls: ResMut<PlayerControls>,
     mut archers: Query<&mut Archer, With<ArcherPlayer>>,
 ) {
     for mut archer in archers.iter_mut() {
@@ -236,8 +250,8 @@ fn player_archer_update_system(
 
         archer.is_combat = player_controls.aiming();
         if archer.is_combat {
-            let min_angle = f32::to_radians(-60.0);
-            let max_angle = f32::to_radians(60.0);
+            let min_angle = f32::to_radians(-80.0);
+            let max_angle = f32::to_radians(80.0);
             let controls_angle = player_controls.angle();
             let angle_out_of_bounds = controls_angle > max_angle || controls_angle < min_angle;
             let angle = if angle_out_of_bounds {
@@ -252,13 +266,17 @@ fn player_archer_update_system(
                 player_controls.percent()
             };
             archer.pull_power = pull;
-        } else {
-            archer.pull_angle = 0.0;
-            archer.pull_power = 0.0;
+
+            player_controls.set_indicator_color(if angle_out_of_bounds {
+                Color::RED
+            } else {
+                Color::WHITE
+            });
         }
 
-        if player_controls.should_shoot_arrow() {
+        if player_controls.should_shoot_arrow() && archer.pull_power > 0.0 {
             archer.shoot_arrow = true;
+            player_controls.reset_shooting();
         }
     }
 }
@@ -325,9 +343,9 @@ fn archers_bow_update_system(
 fn archers_look_at_bow_update_system(
     archers: Query<&Archer>,
     bows: Query<(&ArcherComponent, &GlobalTransform), With<Bow>>,
-    mut look_at_bows: Query<(&ArcherComponent, &mut Transform), With<LookAtBow>>,
+    mut look_at_bows: Query<(&ArcherComponent, &GlobalTransform, &mut Transform), With<LookAtBow>>,
 ) {
-    for (archer_component, mut transform) in look_at_bows.iter_mut() {
+    for (archer_component, global_transform, mut transform) in look_at_bows.iter_mut() {
         if let Ok(archer) = archers.get(archer_component.parent) {
             if !archer.is_combat {
                 continue;
@@ -336,7 +354,7 @@ fn archers_look_at_bow_update_system(
             for (bow_archer_component, bow_global_transform) in bows.iter() {
                 if bow_archer_component.parent == archer_component.parent {
                     let look_target = bow_global_transform.translation();
-                    let diff = look_target - transform.translation;
+                    let diff = look_target - global_transform.translation();
                     let angle = f32::atan2(diff.y, diff.x);
                     transform.rotation = Quat::from_axis_angle(ROT_AXIS_Z, angle);
                 }
@@ -347,23 +365,34 @@ fn archers_look_at_bow_update_system(
 
 fn archer_shooting_system(
     mut commands: Commands,
-    mut archers: Query<&mut Archer>,
+    game_textures: Res<GameTextures>,
+    mut archers: Query<(Entity, &mut Archer)>,
     shooting_points: Query<(&ArcherComponent, &GlobalTransform), With<ShootingPoint>>,
 ) {
     for (archer_component, transform) in shooting_points.iter() {
-        if let Ok(mut archer) = archers.get_mut(archer_component.parent) {
+        if let Ok((entity, mut archer)) = archers.get_mut(archer_component.parent) {
             if archer.shoot_arrow {
                 archer.shoot_arrow = false;
-                // TODO: Spawn arrow here
-                commands.spawn(SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::BLUE,
-                        custom_size: Vec2::new(0.2, 0.2).into(),
+                let translation = transform.translation();
+                let start_pos = Vec2::new(translation.x, translation.y);
+                commands
+                    .spawn(SpriteBundle {
+                        texture: game_textures.archer_arrow.clone(),
+                        sprite: Sprite {
+                            custom_size: Vec2::new(4.0, 4.0).into(),
+                            ..default()
+                        },
+                        transform: Transform::from_translation(translation),
                         ..default()
-                    },
-                    transform: Transform::from_translation(transform.translation()),
-                    ..default()
-                });
+                    })
+                    .insert(Arrow::new(
+                        entity,
+                        start_pos,
+                        archer.pull_power * 10.0,
+                        archer.pull_angle,
+                    ));
+                archer.pull_angle = 0.0;
+                archer.pull_power = 0.0;
             }
         }
     }
@@ -429,11 +458,13 @@ fn trajectory_points_update_system(
         }
 
         let mut t: f32 = 0.0;
-        let t_delta = 0.01;
+        let t_delta = 0.005;
         for mut transform in trajectory_points.iter_mut() {
-            let x: f32 = trajectory.power * t * f32::cos(trajectory.angle);
+            let mut x: f32 = trajectory.power * t * f32::cos(trajectory.angle);
             let mut y: f32 = trajectory.power * t * f32::sin(trajectory.angle);
             y -= 0.5 * 9.0 * t * t;
+            x *= 4.0;
+            y *= 4.0;
 
             transform.translation.x = x;
             transform.translation.y = y;
