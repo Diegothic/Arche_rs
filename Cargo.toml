@@ -13,3 +13,4 @@ opt-level = 3
 
 [dependencies]
 bevy = "0.9.1"
+rand = "0.8.5"

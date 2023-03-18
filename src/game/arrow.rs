@@ -31,13 +31,18 @@ impl Arrow {
     }
 
     pub fn pos_at_time(&self, time: f32) -> Vec2 {
-        let mut x: f32 = self.velocity * time * f32::cos(self.angle);
-        let mut y: f32 = self.velocity * time * f32::sin(self.angle);
-        y -= 0.5 * 9.0 * time * time;
+        let mut position = Arrow::get_trajectory(self.velocity, self.angle, time);
+        position.x += self.start_pos.x;
+        position.y += self.start_pos.y;
+        position
+    }
+
+    pub fn get_trajectory(velocity: f32, angle: f32, t: f32) -> Vec2 {
+        let mut x: f32 = velocity * t * f32::cos(angle);
+        let mut y: f32 = velocity * t * f32::sin(angle);
+        y -= 0.5 * 9.0 * t * t;
         x *= 4.0;
         y *= 4.0;
-        x += self.start_pos.x;
-        y += self.start_pos.y;
         Vec2::new(x, y)
     }
 }

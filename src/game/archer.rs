@@ -1,3 +1,7 @@
+use std::f32::consts::PI;
+
+use rand::prelude::*;
+
 use bevy::{prelude::*, sprite::Anchor};
 
 use super::{
@@ -11,6 +15,7 @@ impl Plugin for ArcherPlugin {
     fn build(&self, app: &mut App) {
         app.add_startup_system(spawn_archer_system)
             .add_system(player_archer_update_system)
+            .add_system(enemy_archer_update_system)
             .add_system(archers_visibility_update_system)
             .add_system(archers_look_at_target_update_system)
             .add_system(archers_react_to_pull_update_system)
@@ -23,13 +28,14 @@ impl Plugin for ArcherPlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Archer {
     is_active: bool,
     is_combat: bool,
     pull_angle: f32,
     pull_power: f32,
     shoot_arrow: bool,
+    flipped: bool,
 }
 
 impl Archer {
@@ -40,12 +46,16 @@ impl Archer {
             pull_angle: 0.0,
             pull_power: 0.0,
             shoot_arrow: false,
+            flipped: false,
         }
     }
 }
 
 #[derive(Component)]
 struct ArcherPlayer;
+
+#[derive(Component)]
+struct ArcherEnemy;
 
 #[derive(Component)]
 struct ArcherIdle;
@@ -84,13 +94,25 @@ struct ArrowTrajectoryPoint;
 struct ArrowTrajectoryReceiver;
 
 fn spawn_archer_system(mut commands: Commands, game_textures: Res<GameTextures>) {
+    let mut archer = Archer::new();
     let archer_player = commands
         .spawn(SpatialBundle {
             transform: Transform::from_translation(Vec3::new(-12.0, -2.0, 0.0)),
             ..default()
         })
-        .insert(Archer::new())
+        .insert(archer.clone())
         .insert(ArcherPlayer)
+        .id();
+
+    archer.flipped = true;
+    let archer_enemy = commands
+        .spawn(SpatialBundle {
+            transform: Transform::from_translation(Vec3::new(12.0, -2.0, 0.0))
+                .with_scale(Vec3::new(-1.0, 1.0, 1.0)),
+            ..default()
+        })
+        .insert(archer)
+        .insert(ArcherEnemy)
         .id();
 
     let mut spawn_archer = |parent_archer: Entity, receive_trajectory: bool| {
@@ -235,6 +257,7 @@ fn spawn_archer_system(mut commands: Commands, game_textures: Res<GameTextures>)
     };
 
     spawn_archer(archer_player, true);
+    spawn_archer(archer_enemy, false);
 }
 
 fn player_archer_update_system(
@@ -277,6 +300,31 @@ fn player_archer_update_system(
         if player_controls.should_shoot_arrow() && archer.pull_power > 0.0 {
             archer.shoot_arrow = true;
             player_controls.reset_shooting();
+        }
+    }
+}
+
+fn enemy_archer_update_system(
+    keyboard: Res<Input<KeyCode>>,
+    mut archers: Query<&mut Archer, With<ArcherEnemy>>,
+) {
+    for mut archer in archers.iter_mut() {
+        if !keyboard.pressed(KeyCode::A) {
+            archer.is_active = false;
+            archer.is_combat = false;
+            continue;
+        }
+
+        archer.is_combat = true;
+        if keyboard.just_pressed(KeyCode::S) {
+            let angle = f32::to_radians(rand::thread_rng().gen_range(-80.0..=80.0));
+            archer.pull_angle = angle;
+            let pull = rand::thread_rng().gen_range(0.0..=1.0);
+            archer.pull_power = pull;
+        }
+
+        if keyboard.just_pressed(KeyCode::D) {
+            archer.shoot_arrow = true;
         }
     }
 }
@@ -355,7 +403,12 @@ fn archers_look_at_bow_update_system(
                 if bow_archer_component.parent == archer_component.parent {
                     let look_target = bow_global_transform.translation();
                     let diff = look_target - global_transform.translation();
-                    let angle = f32::atan2(diff.y, diff.x);
+                    let mut angle = f32::atan2(diff.y, diff.x);
+                    if archer.flipped {
+                        angle -= PI;
+                        angle *= -1.0;
+                    }
+
                     transform.rotation = Quat::from_axis_angle(ROT_AXIS_Z, angle);
                 }
             }
@@ -375,6 +428,13 @@ fn archer_shooting_system(
                 archer.shoot_arrow = false;
                 let translation = transform.translation();
                 let start_pos = Vec2::new(translation.x, translation.y);
+                let arrow_velocity = archer.pull_power * 10.0;
+                let mut arrow_angle = archer.pull_angle;
+                if archer.flipped {
+                    arrow_angle -= PI;
+                    arrow_angle *= -1.0;
+                }
+
                 commands
                     .spawn(SpriteBundle {
                         texture: game_textures.archer_arrow.clone(),
@@ -382,17 +442,11 @@ fn archer_shooting_system(
                             custom_size: Vec2::new(4.0, 4.0).into(),
                             ..default()
                         },
-                        transform: Transform::from_translation(translation),
+                        transform: Transform::from_translation(translation)
+                            .with_rotation(Quat::from_rotation_z(arrow_angle)),
                         ..default()
                     })
-                    .insert(Arrow::new(
-                        entity,
-                        start_pos,
-                        archer.pull_power * 10.0,
-                        archer.pull_angle,
-                    ));
-                archer.pull_angle = 0.0;
-                archer.pull_power = 0.0;
+                    .insert(Arrow::new(entity, start_pos, arrow_velocity, arrow_angle));
             }
         }
     }
@@ -460,14 +514,9 @@ fn trajectory_points_update_system(
         let mut t: f32 = 0.0;
         let t_delta = 0.005;
         for mut transform in trajectory_points.iter_mut() {
-            let mut x: f32 = trajectory.power * t * f32::cos(trajectory.angle);
-            let mut y: f32 = trajectory.power * t * f32::sin(trajectory.angle);
-            y -= 0.5 * 9.0 * t * t;
-            x *= 4.0;
-            y *= 4.0;
-
-            transform.translation.x = x;
-            transform.translation.y = y;
+            let position = Arrow::get_trajectory(trajectory.power, trajectory.angle, t);
+            transform.translation.x = position.x;
+            transform.translation.y = position.y;
             transform.translation.z = 5.0;
             transform.scale = Vec3::splat(((1.0 - (t / t_delta / 50.0)) / 20.0) + 0.01);
             t += t_delta;
