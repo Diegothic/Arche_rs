@@ -2,12 +2,14 @@ use bevy::app::AppExit;
 use bevy::{prelude::*, render::camera::ScalingMode};
 use rand::Rng;
 
+use self::ai_controls::AIControlsPlugin;
 use self::animation::AnimationPlugin;
 use self::archer::{spawn_archer, Archer, ArcherEnemy, ArcherPlayer, ArcherPlugin};
 use self::arrow::{Arrow, ArrowPlugin};
 use self::collision::{CollisionPlugin, RectCollider};
 use self::player_controls::{PlayerControls, PlayerControlsPlugin};
 
+mod ai_controls;
 mod animation;
 mod archer;
 mod arrow;
@@ -24,6 +26,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(AnimationPlugin)
             .add_plugin(PlayerControlsPlugin)
+            .add_plugin(AIControlsPlugin)
             .add_plugin(ArcherPlugin)
             .add_plugin(ArrowPlugin)
             .add_plugin(CollisionPlugin)

@@ -7,8 +7,9 @@ use bevy::{prelude::*, sprite::Anchor};
 use crate::game::eval_shot;
 
 use super::{
-    animation::Animation, animation::AnimationMode, arrow::Arrow, collision::RectCollider,
-    player_controls::PlayerControls, GameStageSpawned, GameState, GameTextures, ROT_AXIS_Z,
+    ai_controls::AIControls, animation::Animation, animation::AnimationMode, arrow::Arrow,
+    collision::RectCollider, player_controls::PlayerControls, GameStageSpawned, GameState,
+    GameTextures, ROT_AXIS_Z,
 };
 
 pub struct ArcherPlugin;
@@ -375,14 +376,20 @@ fn player_archer_update_system(
 fn enemy_archer_update_system(
     mut commands: Commands,
     keyboard: Res<Input<KeyCode>>,
+    game_state: Res<GameState>,
+    mut ai_controls: ResMut<AIControls>,
     mut archers: Query<(Entity, &mut Archer), With<ArcherEnemy>>,
 ) {
     for (entity, mut archer) in archers.iter_mut() {
         if keyboard.just_pressed(KeyCode::S) {
             archer.is_active = true;
             archer.is_combat = true;
-            let angle = f32::to_radians(rand::thread_rng().gen_range(-80.0..=80.0));
-            let pull = rand::thread_rng().gen_range(0.0..=1.0);
+
+            //let angle = f32::to_radians(rand::thread_rng().gen_range(-80.0..=80.0));
+            //let pull = rand::thread_rng().gen_range(0.0..=1.0);
+            ai_controls.think(&game_state);
+            let angle = ai_controls.get_pull_angle();
+            let pull = ai_controls.get_pull_power();
 
             commands.entity(entity).remove::<ShootAI>();
             commands.entity(entity).insert(ShootAI {
