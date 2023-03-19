@@ -3,11 +3,13 @@ use bevy::{prelude::*, render::camera::ScalingMode};
 use self::animation::AnimationPlugin;
 use self::archer::ArcherPlugin;
 use self::arrow::ArrowPlugin;
+use self::collision::CollisionPlugin;
 use self::player_controls::PlayerControlsPlugin;
 
 mod animation;
 mod archer;
 mod arrow;
+mod collision;
 mod player_controls;
 
 const ROT_AXIS_Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
@@ -20,6 +22,7 @@ impl Plugin for GamePlugin {
             .add_plugin(PlayerControlsPlugin)
             .add_plugin(ArcherPlugin)
             .add_plugin(ArrowPlugin)
+            .add_plugin(CollisionPlugin)
             .add_startup_system_set_to_stage(
                 StartupStage::PreStartup,
                 SystemSet::new()
@@ -43,6 +46,38 @@ struct GameTextures {
 #[derive(Component)]
 struct MainCamera;
 
+enum GameStage {
+    Menu,
+    Playing,
+    Finished(GameTurn),
+}
+
+enum GameTurn {
+    Player,
+    Enemy,
+}
+
+#[derive(Resource)]
+struct GameState {
+    stage: GameStage,
+    needs_refresh: bool,
+    turn: GameTurn,
+    waiting_for_hit: bool,
+    turn_count: u32,
+}
+
+impl GameState {
+    fn new() -> Self {
+        Self {
+            stage: GameStage::Menu,
+            needs_refresh: true,
+            turn: GameTurn::Player,
+            waiting_for_hit: false,
+            turn_count: 0,
+        }
+    }
+}
+
 fn setup_camera(mut commands: Commands) {
     commands
         .spawn(Camera2dBundle {
@@ -61,6 +96,8 @@ fn setup_resources(
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
 ) {
+    commands.insert_resource(GameState::new());
+
     let texture = asset_server.load("textures/archer_blue_idle.png");
     let atlas = TextureAtlas::from_grid(texture, Vec2::new(64.0, 64.0), 2, 2, None, None);
     let archer_blue_idle_atlas_handle = texture_atlases.add(atlas);

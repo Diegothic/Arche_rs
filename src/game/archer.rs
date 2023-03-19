@@ -5,8 +5,8 @@ use rand::prelude::*;
 use bevy::{prelude::*, sprite::Anchor};
 
 use super::{
-    animation::Animation, animation::AnimationMode, arrow::Arrow, player_controls::PlayerControls,
-    GameTextures, ROT_AXIS_Z,
+    animation::Animation, animation::AnimationMode, arrow::Arrow, collision::RectCollider,
+    player_controls::PlayerControls, GameTextures, ROT_AXIS_Z,
 };
 
 pub struct ArcherPlugin;
@@ -446,7 +446,8 @@ fn archer_shooting_system(
                             .with_rotation(Quat::from_rotation_z(arrow_angle)),
                         ..default()
                     })
-                    .insert(Arrow::new(entity, start_pos, arrow_velocity, arrow_angle));
+                    .insert(Arrow::new(entity, start_pos, arrow_velocity, arrow_angle))
+                    .insert(RectCollider::new(entity, Vec2::ZERO, 1.0, 1.0));
             }
         }
     }
