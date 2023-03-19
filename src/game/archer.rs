@@ -4,9 +4,11 @@ use rand::prelude::*;
 
 use bevy::{prelude::*, sprite::Anchor};
 
+use crate::game::eval_shot;
+
 use super::{
     animation::Animation, animation::AnimationMode, arrow::Arrow, collision::RectCollider,
-    player_controls::PlayerControls, GameStageSpawned, GameTextures, ROT_AXIS_Z,
+    player_controls::PlayerControls, GameStageSpawned, GameState, GameTextures, ROT_AXIS_Z,
 };
 
 pub struct ArcherPlugin;
@@ -15,6 +17,7 @@ impl Plugin for ArcherPlugin {
     fn build(&self, app: &mut App) {
         app.add_system(player_archer_update_system)
             .add_system(enemy_archer_update_system)
+            .add_system(shoot_ai_update_system)
             .add_system(archers_visibility_update_system)
             .add_system(archers_look_at_target_update_system)
             .add_system(archers_react_to_pull_update_system)
@@ -80,6 +83,15 @@ struct LookAtBow;
 struct ShootingPoint;
 
 #[derive(Component)]
+struct ShootAI {
+    angle: f32,
+    power: f32,
+    time: f32,
+    current_time: f32,
+    ready: bool,
+}
+
+#[derive(Component)]
 struct ArrowTrajectory {
     is_enabled: bool,
     angle: f32,
@@ -91,6 +103,11 @@ struct ArrowTrajectoryPoint;
 
 #[derive(Component)]
 struct ArrowTrajectoryReceiver;
+
+#[derive(Component)]
+struct DamageReceiver {
+    hitpoints: i32,
+}
 
 pub fn spawn_archer(
     commands: &mut Commands,
@@ -116,6 +133,63 @@ pub fn spawn_archer(
             parent: parent_archer,
         })
         .id();
+
+    let head_hitbox = commands
+        .spawn(TransformBundle {
+            local: Transform::from_translation(Vec3::new(0.0, 2.8, 0.0)),
+            ..default()
+        })
+        .insert(ArcherComponent {
+            parent: parent_archer,
+        })
+        .insert(RectCollider::new(
+            parent_archer.into(),
+            Vec2::ZERO,
+            0.7,
+            0.7,
+        ))
+        .insert(DamageReceiver { hitpoints: 4 })
+        .id();
+
+    commands.entity(parent_archer).add_child(head_hitbox);
+
+    let body_hitbox = commands
+        .spawn(TransformBundle {
+            local: Transform::from_translation(Vec3::new(0.0, 1.9, 0.0)),
+            ..default()
+        })
+        .insert(ArcherComponent {
+            parent: parent_archer,
+        })
+        .insert(RectCollider::new(
+            parent_archer.into(),
+            Vec2::ZERO,
+            0.8,
+            1.0,
+        ))
+        .insert(DamageReceiver { hitpoints: 2 })
+        .id();
+
+    commands.entity(parent_archer).add_child(body_hitbox);
+
+    let legs_hitbox = commands
+        .spawn(TransformBundle {
+            local: Transform::from_translation(Vec3::new(0.0, 0.7, 0.0)),
+            ..default()
+        })
+        .insert(ArcherComponent {
+            parent: parent_archer,
+        })
+        .insert(RectCollider::new(
+            parent_archer.into(),
+            Vec2::ZERO,
+            0.8,
+            1.2,
+        ))
+        .insert(DamageReceiver { hitpoints: 2 })
+        .id();
+
+    commands.entity(parent_archer).add_child(legs_hitbox);
 
     let mut shooting_point: Option<Entity> = None;
     let archer_combat = commands
@@ -241,6 +315,7 @@ pub fn spawn_archer(
 }
 
 fn player_archer_update_system(
+    game_state: Res<GameState>,
     mut player_controls: ResMut<PlayerControls>,
     mut archers: Query<&mut Archer, With<ArcherPlayer>>,
 ) {
@@ -270,10 +345,23 @@ fn player_archer_update_system(
             };
             archer.pull_power = pull;
 
+            let eval = eval_shot(
+                archer.pull_power,
+                archer.pull_angle,
+                game_state.player_height,
+                game_state.enemy_height,
+            );
+            let color = Color::Rgba {
+                red: 1.0 - eval,
+                green: 1.0,
+                blue: 1.0 - eval,
+                alpha: 1.0,
+            };
+
             player_controls.set_indicator_color(if angle_out_of_bounds {
                 Color::RED
             } else {
-                Color::WHITE
+                color
             });
         }
 
@@ -285,26 +373,50 @@ fn player_archer_update_system(
 }
 
 fn enemy_archer_update_system(
+    mut commands: Commands,
     keyboard: Res<Input<KeyCode>>,
-    mut archers: Query<&mut Archer, With<ArcherEnemy>>,
+    mut archers: Query<(Entity, &mut Archer), With<ArcherEnemy>>,
 ) {
-    for mut archer in archers.iter_mut() {
-        if !keyboard.pressed(KeyCode::A) {
-            archer.is_active = false;
-            archer.is_combat = false;
-            continue;
-        }
-
-        archer.is_combat = true;
+    for (entity, mut archer) in archers.iter_mut() {
         if keyboard.just_pressed(KeyCode::S) {
+            archer.is_active = true;
+            archer.is_combat = true;
             let angle = f32::to_radians(rand::thread_rng().gen_range(-80.0..=80.0));
-            archer.pull_angle = angle;
             let pull = rand::thread_rng().gen_range(0.0..=1.0);
-            archer.pull_power = pull;
-        }
 
-        if keyboard.just_pressed(KeyCode::D) {
+            commands.entity(entity).remove::<ShootAI>();
+            commands.entity(entity).insert(ShootAI {
+                angle,
+                power: pull,
+                time: 1.0,
+                current_time: 0.0,
+                ready: false,
+            });
+        }
+    }
+}
+
+fn shoot_ai_update_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut archers: Query<(Entity, &mut ShootAI, &mut Archer), With<ArcherEnemy>>,
+) {
+    for (entity, mut shoot_ai, mut archer) in archers.iter_mut() {
+        shoot_ai.current_time += time.delta_seconds();
+
+        if shoot_ai.current_time > shoot_ai.time {
+            archer.pull_angle = shoot_ai.angle;
+            archer.pull_power = shoot_ai.power;
             archer.shoot_arrow = true;
+            commands.entity(entity).remove::<ShootAI>();
+        } else {
+            let angle_delta =
+                shoot_ai.angle * (shoot_ai.current_time + shoot_ai.time * 0.3).clamp(0.0, 1.0);
+            archer.pull_angle = angle_delta;
+
+            let power_delta =
+                shoot_ai.power * (shoot_ai.current_time + shoot_ai.time * 0.3).clamp(0.0, 1.0);
+            archer.pull_power = power_delta;
         }
     }
 }
@@ -428,7 +540,10 @@ fn archer_shooting_system(
                     })
                     .insert(Arrow::new(entity, start_pos, arrow_velocity, arrow_angle))
                     .insert(GameStageSpawned)
-                    .insert(RectCollider::new(entity, Vec2::ZERO, 0.3, 0.3));
+                    .insert(RectCollider::new(entity.into(), Vec2::ZERO, 0.3, 0.3));
+
+                archer.is_active = false;
+                archer.is_combat = false;
             }
         }
     }

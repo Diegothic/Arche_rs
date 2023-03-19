@@ -1,5 +1,6 @@
 use bevy::app::AppExit;
 use bevy::{prelude::*, render::camera::ScalingMode};
+use rand::Rng;
 
 use self::animation::AnimationPlugin;
 use self::archer::{spawn_archer, Archer, ArcherEnemy, ArcherPlayer, ArcherPlugin};
@@ -15,7 +16,7 @@ mod player_controls;
 
 const ROT_AXIS_Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 const CAMERA_SCALING_MENU: f32 = 6.0;
-const CAMERA_SCALING_GAME: f32 = 18.0;
+const CAMERA_SCALING_GAME: f32 = 17.0;
 
 pub struct GamePlugin;
 
@@ -81,6 +82,8 @@ pub struct GameState {
     pub turn: GameTurn,
     pub waiting_for_hit: bool,
     pub turn_count: i32,
+    pub player_height: f32,
+    pub enemy_height: f32,
 }
 
 impl GameState {
@@ -91,6 +94,8 @@ impl GameState {
             turn: GameTurn::Enemy,
             waiting_for_hit: false,
             turn_count: -1,
+            player_height: 0.5,
+            enemy_height: 0.5,
         }
     }
 }
@@ -224,7 +229,7 @@ fn setup_game_stage_update_system(
 
             commands
                 .entity(start)
-                .insert(RectCollider::new(start, Vec2::ZERO, 1.0, 1.0));
+                .insert(RectCollider::new(start.into(), Vec2::ZERO, 1.0, 1.0));
 
             let credits = commands
                 .spawn(SpriteBundle {
@@ -240,9 +245,12 @@ fn setup_game_stage_update_system(
                 .insert(GameStageSpawned)
                 .id();
 
-            commands
-                .entity(credits)
-                .insert(RectCollider::new(credits, Vec2::ZERO, 1.0, 1.0));
+            commands.entity(credits).insert(RectCollider::new(
+                credits.into(),
+                Vec2::ZERO,
+                1.0,
+                1.0,
+            ));
 
             let quit = commands
                 .spawn(SpriteBundle {
@@ -260,7 +268,7 @@ fn setup_game_stage_update_system(
 
             commands
                 .entity(quit)
-                .insert(RectCollider::new(quit, Vec2::ZERO, 1.0, 1.0));
+                .insert(RectCollider::new(quit.into(), Vec2::ZERO, 1.0, 1.0));
         }
         GameStage::Credits => {
             clear_scene();
@@ -308,16 +316,19 @@ fn setup_game_stage_update_system(
 
             commands
                 .entity(back)
-                .insert(RectCollider::new(back, Vec2::ZERO, 1.0, 1.0));
+                .insert(RectCollider::new(back.into(), Vec2::ZERO, 1.0, 1.0));
         }
         GameStage::Playing => {
             clear_scene();
             camera_projection.scaling_mode = ScalingMode::FixedVertical(CAMERA_SCALING_GAME);
             player_controls.reset();
+            game_state.player_height = rand::thread_rng().gen_range(0.0..=1.0);
+            game_state.enemy_height = rand::thread_rng().gen_range(0.0..=1.0);
 
+            let player_height = (game_state.player_height * 14.0) - (17.0 * 0.5) + 1.0;
             let archer_player = commands
                 .spawn(SpatialBundle {
-                    transform: Transform::from_translation(Vec3::new(-12.0, -2.0, 0.0)),
+                    transform: Transform::from_translation(Vec3::new(-12.0, player_height, 0.0)),
                     ..default()
                 })
                 .insert(Archer::new(false))
@@ -325,9 +336,10 @@ fn setup_game_stage_update_system(
                 .insert(GameStageSpawned)
                 .id();
 
+            let enemy_height = (game_state.enemy_height * 14.0) - (17.0 * 0.5) + 1.0;
             let archer_enemy = commands
                 .spawn(SpatialBundle {
-                    transform: Transform::from_translation(Vec3::new(12.0, -2.0, 0.0))
+                    transform: Transform::from_translation(Vec3::new(12.0, enemy_height, 0.0))
                         .with_scale(Vec3::new(-1.0, 1.0, 1.0)),
                     ..default()
                 })
@@ -364,19 +376,20 @@ fn menu_buttons_update_system(
     mut game_state: ResMut<GameState>,
     mut exit: EventWriter<AppExit>,
     buttons: Query<(&MenuButton, &RectCollider)>,
-    mut arrows: Query<(&Arrow, &mut RectCollider), Without<MenuButton>>,
+    mut arrows: Query<(&mut Arrow, &mut RectCollider), Without<MenuButton>>,
 ) {
     if game_state.needs_refresh {
         return;
     }
 
     for (button, collider) in buttons.iter() {
-        for (_, mut arrow_collider) in arrows.iter_mut() {
+        for (mut arrow, mut arrow_collider) in arrows.iter_mut() {
             if collider.aabb_collides_with(&arrow_collider) {
                 match button {
                     MenuButton::Start => {
                         if game_state.stage == GameStage::Menu {
                             arrow_collider.disable();
+                            arrow.set_moving(false);
                             game_state.stage = GameStage::ChangeTurn;
                             game_state.needs_refresh = true;
                         }
@@ -384,6 +397,7 @@ fn menu_buttons_update_system(
                     MenuButton::Credits => {
                         if game_state.stage == GameStage::Menu {
                             arrow_collider.disable();
+                            arrow.set_moving(false);
                             game_state.stage = GameStage::Credits;
                             game_state.needs_refresh = true;
                         }
@@ -391,6 +405,7 @@ fn menu_buttons_update_system(
                     MenuButton::BackFromCredits => {
                         if game_state.stage == GameStage::Credits {
                             arrow_collider.disable();
+                            arrow.set_moving(false);
                             game_state.stage = GameStage::Menu;
                             game_state.needs_refresh = true;
                         }
@@ -398,6 +413,7 @@ fn menu_buttons_update_system(
                     MenuButton::Quit => {
                         if game_state.stage == GameStage::Menu {
                             arrow_collider.disable();
+                            arrow.set_moving(false);
                             exit.send(AppExit);
                         }
                     }
@@ -406,5 +422,60 @@ fn menu_buttons_update_system(
                 return;
             }
         }
+    }
+}
+
+pub fn eval_shot(power: f32, angle: f32, self_height: f32, enemy_height: f32) -> f32 {
+    let self_height_real = (self_height * 14.0) - (17.0 * 0.5) + 1.0;
+    let enemy_height_real = (enemy_height * 14.0) - (17.0 * 0.5) + 1.0;
+
+    let shooting_vec = Vec2::new(f32::cos(angle), f32::sin(angle)) * 2.55;
+    let mut shoot_pos = Vec2::new(-12.0, self_height_real);
+    shoot_pos += Vec2::new(0.3, 2.1);
+    shoot_pos += shooting_vec;
+
+    let mut arrow_col = RectCollider::new(None, Vec2::ZERO, 0.3, 0.3);
+    arrow_col.set_center(shoot_pos);
+
+    let enemy_pos = Vec2::new(12.0, enemy_height_real);
+    let mut enemy_legs_col = RectCollider::new(None, Vec2::ZERO, 0.8, 1.2);
+    let enemy_legs_pos = enemy_pos + Vec2::new(0.0, 0.7);
+    enemy_legs_col.set_center(enemy_legs_pos);
+
+    let mut enemy_body_col = RectCollider::new(None, Vec2::ZERO, 0.8, 1.0);
+    let enemy_body_pos = enemy_pos + Vec2::new(0.0, 1.9);
+    enemy_body_col.set_center(enemy_body_pos);
+
+    let mut enemy_head_col = RectCollider::new(None, Vec2::ZERO, 0.7, 0.7);
+    let enemy_head_pos = enemy_pos + Vec2::new(0.0, 2.8);
+    enemy_head_col.set_center(enemy_head_pos);
+
+    let mut t = 0.0;
+    loop {
+        let arrow_pos = Arrow::get_trajectory(power * 10.0, angle, t);
+        let arrow_col_pos = shoot_pos + arrow_pos;
+        arrow_col.set_center(arrow_col_pos);
+        if arrow_col.aabb_collides_with(&enemy_head_col) {
+            return 1.0;
+        }
+
+        if arrow_col.aabb_collides_with(&enemy_body_col) {
+            return 0.8;
+        }
+
+        if arrow_col.aabb_collides_with(&enemy_legs_col) {
+            return 0.5;
+        }
+
+        if arrow_col_pos.x > 12.0 || arrow_col_pos.y > 12.0 || arrow_col_pos.y < -12.0 {
+            let mut dist = arrow_col_pos.distance(enemy_head_pos);
+            dist = dist.min(10.0);
+            dist /= 10.0;
+            dist = 1.0 - dist;
+            dist *= 0.5;
+            return dist;
+        }
+
+        t += 0.01;
     }
 }

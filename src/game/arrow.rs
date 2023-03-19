@@ -13,6 +13,7 @@ impl Plugin for ArrowPlugin {
 #[derive(Component)]
 pub struct Arrow {
     owner: Entity,
+    is_moving: bool,
     start_pos: Vec2,
     velocity: f32,
     angle: f32,
@@ -23,11 +24,16 @@ impl Arrow {
     pub fn new(owner: Entity, start_pos: Vec2, velocity: f32, angle: f32) -> Self {
         Self {
             owner,
+            is_moving: true,
             start_pos,
             velocity,
             angle,
             current_time: 0.0,
         }
+    }
+
+    pub fn set_moving(&mut self, value: bool) {
+        self.is_moving = value;
     }
 
     pub fn pos_at_time(&self, time: f32) -> Vec2 {
@@ -49,6 +55,10 @@ impl Arrow {
 
 fn arrow_update_system(time: Res<Time>, mut arrows: Query<(&mut Arrow, &mut Transform)>) {
     for (mut arrow, mut transform) in arrows.iter_mut() {
+        if !arrow.is_moving {
+            continue;
+        }
+
         arrow.current_time += time.delta_seconds() * 0.5;
         let new_pos = arrow.pos_at_time(arrow.current_time);
         let new_translation = Vec3::new(new_pos.x, new_pos.y, transform.translation.z);

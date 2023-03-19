@@ -19,7 +19,7 @@ struct ColliderSettings {
 
 #[derive(Component)]
 pub struct RectCollider {
-    pub owner: Entity,
+    pub owner: Option<Entity>,
     enabled: bool,
     center: Vec2,
     offset: Vec2,
@@ -32,7 +32,7 @@ struct DebugColliderView {
 }
 
 impl RectCollider {
-    pub fn new(owner: Entity, offset: Vec2, width: f32, height: f32) -> Self {
+    pub fn new(owner: Option<Entity>, offset: Vec2, width: f32, height: f32) -> Self {
         Self {
             owner,
             enabled: true,
@@ -50,18 +50,15 @@ impl RectCollider {
         Vec2::new(self.half_extends.x * 2.0, self.half_extends.y * 2.0)
     }
 
-    pub fn width(&self) -> f32 {
-        self.half_extends.x * 2.0
-    }
-
-    pub fn height(&self) -> f32 {
-        self.half_extends.y * 2.0
+    pub fn set_center(&mut self, value: Vec2) {
+        self.center = value;
     }
 
     pub fn aabb_collides_with(&self, other: &RectCollider) -> bool {
         if !self.enabled || !other.enabled {
             return false;
         }
+
         let self_pos = self.center + self.offset;
         let self_xs = self_pos.x - self.half_extends.x;
         let self_xe = self_pos.x + self.half_extends.x;
@@ -155,9 +152,9 @@ fn collider_debug_update_system(
     }
 }
 
-fn colliders_position_update_system(mut colliders: Query<(&mut RectCollider, &Transform)>) {
+fn colliders_position_update_system(mut colliders: Query<(&mut RectCollider, &GlobalTransform)>) {
     for (mut collider, transform) in colliders.iter_mut() {
-        let new_pos = transform.translation.truncate();
+        let new_pos = transform.translation().truncate();
         collider.center = new_pos;
     }
 }
