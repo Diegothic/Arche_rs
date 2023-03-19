@@ -20,6 +20,7 @@ struct ColliderSettings {
 #[derive(Component)]
 pub struct RectCollider {
     pub owner: Entity,
+    enabled: bool,
     center: Vec2,
     offset: Vec2,
     half_extends: Vec2,
@@ -34,10 +35,15 @@ impl RectCollider {
     pub fn new(owner: Entity, offset: Vec2, width: f32, height: f32) -> Self {
         Self {
             owner,
+            enabled: true,
             center: Vec2::ZERO,
             offset,
             half_extends: Vec2::new(f32::abs(width) * 0.5, f32::abs(height) * 0.5),
         }
+    }
+
+    pub fn disable(&mut self) {
+        self.enabled = false;
     }
 
     pub fn size(&self) -> Vec2 {
@@ -53,6 +59,9 @@ impl RectCollider {
     }
 
     pub fn aabb_collides_with(&self, other: &RectCollider) -> bool {
+        if !self.enabled || !other.enabled {
+            return false;
+        }
         let self_pos = self.center + self.offset;
         let self_xs = self_pos.x - self.half_extends.x;
         let self_xe = self_pos.x + self.half_extends.x;
@@ -103,16 +112,20 @@ fn collider_added_debug_system(
 }
 
 fn collider_debug_update_system(
+    mut commands: Commands,
     collider_settings: Res<ColliderSettings>,
     colliders: Query<(Entity, &RectCollider)>,
     mut colliders_debug: Query<(
+        Entity,
         &mut Sprite,
         &mut Transform,
         &mut Visibility,
         &DebugColliderView,
     )>,
 ) {
-    for (mut sprite, mut transform, mut visibility, collider_debug) in colliders_debug.iter_mut() {
+    for (entity, mut sprite, mut transform, mut visibility, collider_debug) in
+        colliders_debug.iter_mut()
+    {
         if let Ok((collider_entity, collider)) = colliders.get(collider_debug.collider) {
             visibility.is_visible = collider_settings.show_debugs;
             sprite.custom_size = collider.size().into();
@@ -136,6 +149,8 @@ fn collider_debug_update_system(
                 }
             }
             sprite.color = color;
+        } else {
+            commands.entity(entity).despawn_recursive();
         }
     }
 }

@@ -9,7 +9,7 @@ pub struct PlayerControlsPlugin;
 impl Plugin for PlayerControlsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MouseWorldPos(Vec3::ZERO))
-            .insert_resource(PlayerControls::new(true, 5.0))
+            .insert_resource(PlayerControls::new(false, 5.0))
             .add_startup_system(setup_player_controls_startup_system)
             .add_system(mouse_world_pos_update_system)
             .add_system(player_controls_update_system)
@@ -40,8 +40,20 @@ impl PlayerControls {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.is_aiming = false;
+        self.hook_pos = Vec3::ZERO;
+        self.current_pos = Vec3::ZERO;
+        self.distance = 0.0;
+        self.reset_shooting();
+    }
+
     pub fn enabled(&self) -> bool {
         self.is_enabled
+    }
+
+    pub fn set_enabled(&mut self, value: bool) {
+        self.is_enabled = value;
     }
 
     pub fn aiming(&self) -> bool {
