@@ -2,9 +2,9 @@ use bevy::app::AppExit;
 use bevy::{prelude::*, render::camera::ScalingMode};
 use rand::Rng;
 
-use self::ai_controls::AIControlsPlugin;
+use self::ai_controls::{AIControls, AIControlsPlugin};
 use self::animation::AnimationPlugin;
-use self::archer::{spawn_archer, Archer, ArcherEnemy, ArcherPlayer, ArcherPlugin};
+use self::archer::{spawn_archer, Archer, ArcherEnemy, ArcherPlayer, ArcherPlugin, DamageReceiver};
 use self::arrow::{Arrow, ArrowPlugin};
 use self::collision::{CollisionPlugin, RectCollider};
 use self::player_controls::{PlayerControls, PlayerControlsPlugin};
@@ -37,7 +37,8 @@ impl Plugin for GamePlugin {
                     .with_system(setup_resources),
             )
             .add_system(setup_game_stage_update_system)
-            .add_system(menu_buttons_update_system);
+            .add_system(menu_buttons_update_system)
+            .add_system(game_arrow_update_system);
     }
 }
 
@@ -64,6 +65,7 @@ pub struct MainCamera;
 pub enum GameStage {
     Menu,
     Credits,
+    StartGame,
     Playing,
     ChangeTurn,
     Finished(GameTurn),
@@ -87,6 +89,8 @@ pub struct GameState {
     pub turn_count: i32,
     pub player_height: f32,
     pub enemy_height: f32,
+    pub player_health: i32,
+    pub enemy_health: i32,
 }
 
 impl GameState {
@@ -99,6 +103,8 @@ impl GameState {
             turn_count: -1,
             player_height: 0.5,
             enemy_height: 0.5,
+            player_health: 10,
+            enemy_health: 10,
         }
     }
 }
@@ -180,8 +186,11 @@ fn setup_game_stage_update_system(
     mut cameras: Query<(&Camera, &mut OrthographicProjection), With<MainCamera>>,
     mut game_state: ResMut<GameState>,
     mut player_controls: ResMut<PlayerControls>,
+    mut ai_controls: ResMut<AIControls>,
     game_textures: Res<GameTextures>,
     mut stage_spawned: Query<(Entity, &mut Visibility, &GameStageSpawned)>,
+    mut archers_player: Query<&mut Transform, (With<ArcherPlayer>, Without<ArcherEnemy>)>,
+    mut archers_enemy: Query<&mut Transform, (With<ArcherEnemy>, Without<ArcherPlayer>)>,
 ) {
     if !game_state.needs_refresh {
         return;
@@ -321,17 +330,13 @@ fn setup_game_stage_update_system(
                 .entity(back)
                 .insert(RectCollider::new(back.into(), Vec2::ZERO, 1.0, 1.0));
         }
-        GameStage::Playing => {
+        GameStage::StartGame => {
             clear_scene();
             camera_projection.scaling_mode = ScalingMode::FixedVertical(CAMERA_SCALING_GAME);
-            player_controls.reset();
-            game_state.player_height = rand::thread_rng().gen_range(0.0..=1.0);
-            game_state.enemy_height = rand::thread_rng().gen_range(0.0..=1.0);
 
-            let player_height = (game_state.player_height * 14.0) - (17.0 * 0.5) + 1.0;
             let archer_player = commands
                 .spawn(SpatialBundle {
-                    transform: Transform::from_translation(Vec3::new(-12.0, player_height, 0.0)),
+                    transform: Transform::from_translation(Vec3::new(-12.0, 0.0, 0.0)),
                     ..default()
                 })
                 .insert(Archer::new(false))
@@ -339,10 +344,9 @@ fn setup_game_stage_update_system(
                 .insert(GameStageSpawned)
                 .id();
 
-            let enemy_height = (game_state.enemy_height * 14.0) - (17.0 * 0.5) + 1.0;
             let archer_enemy = commands
                 .spawn(SpatialBundle {
-                    transform: Transform::from_translation(Vec3::new(12.0, enemy_height, 0.0))
+                    transform: Transform::from_translation(Vec3::new(12.0, 0.0, 0.0))
                         .with_scale(Vec3::new(-1.0, 1.0, 1.0)),
                     ..default()
                 })
@@ -353,6 +357,31 @@ fn setup_game_stage_update_system(
 
             spawn_archer(&mut commands, &game_textures, archer_player, true);
             spawn_archer(&mut commands, &game_textures, archer_enemy, false);
+
+            game_state.stage = GameStage::ChangeTurn;
+            game_state.needs_refresh = true;
+        }
+        GameStage::Playing => {
+            player_controls.reset();
+            game_state.player_height = rand::thread_rng().gen_range(0.0..=1.0);
+            game_state.enemy_height = rand::thread_rng().gen_range(0.0..=1.0);
+            game_state.waiting_for_hit = false;
+            player_controls.set_enabled(match game_state.turn {
+                GameTurn::Player => true,
+                GameTurn::Enemy => false,
+            });
+            ai_controls.set_enabled(true);
+
+            let player_height = (game_state.player_height * 12.0) - (17.0 * 0.5) + 1.0;
+            let enemy_height = (game_state.enemy_height * 12.0) - (17.0 * 0.5) + 1.0;
+
+            for mut transform in archers_player.iter_mut() {
+                transform.translation.y = player_height;
+            }
+
+            for mut transform in archers_enemy.iter_mut() {
+                transform.translation.y = enemy_height;
+            }
         }
         GameStage::ChangeTurn => {
             game_state.turn = match &game_state.turn {
@@ -360,12 +389,7 @@ fn setup_game_stage_update_system(
                 GameTurn::Enemy => GameTurn::Player,
             };
             game_state.turn_count += 1;
-            game_state.waiting_for_hit = false;
             game_state.stage = GameStage::Playing;
-            player_controls.set_enabled(match game_state.turn {
-                GameTurn::Player => true,
-                GameTurn::Enemy => false,
-            });
             game_state.needs_refresh = true;
         }
         GameStage::Finished(winner) => {
@@ -393,7 +417,7 @@ fn menu_buttons_update_system(
                         if game_state.stage == GameStage::Menu {
                             arrow_collider.disable();
                             arrow.set_moving(false);
-                            game_state.stage = GameStage::ChangeTurn;
+                            game_state.stage = GameStage::StartGame;
                             game_state.needs_refresh = true;
                         }
                     }
@@ -428,9 +452,9 @@ fn menu_buttons_update_system(
     }
 }
 
-pub fn eval_shot(power: f32, angle: f32, self_height: f32, enemy_height: f32) -> f32 {
-    let self_height_real = (self_height * 14.0) - (17.0 * 0.5) + 1.0;
-    let enemy_height_real = (enemy_height * 14.0) - (17.0 * 0.5) + 1.0;
+pub fn eval_shot(power: f32, angle: f32, self_height: f32, enemy_height: f32) -> i32 {
+    let self_height_real = (self_height * 12.0) - (17.0 * 0.5) + 1.0;
+    let enemy_height_real = (enemy_height * 12.0) - (17.0 * 0.5) + 1.0;
 
     let shooting_vec = Vec2::new(f32::cos(angle), f32::sin(angle)) * 2.55;
     let mut shoot_pos = Vec2::new(-12.0, self_height_real);
@@ -459,26 +483,101 @@ pub fn eval_shot(power: f32, angle: f32, self_height: f32, enemy_height: f32) ->
         let arrow_col_pos = shoot_pos + arrow_pos;
         arrow_col.set_center(arrow_col_pos);
         if arrow_col.aabb_collides_with(&enemy_head_col) {
-            return 1.0;
+            return 100;
         }
 
         if arrow_col.aabb_collides_with(&enemy_body_col) {
-            return 0.8;
+            return 50;
         }
 
         if arrow_col.aabb_collides_with(&enemy_legs_col) {
-            return 0.5;
+            return 30;
         }
 
         if arrow_col_pos.x > 12.0 || arrow_col_pos.y > 12.0 || arrow_col_pos.y < -12.0 {
-            let mut dist = arrow_col_pos.distance(enemy_head_pos);
-            dist = dist.min(10.0);
-            dist /= 10.0;
-            dist = 1.0 - dist;
-            dist *= 0.5;
-            return dist;
+            return 0;
         }
 
         t += 0.01;
+    }
+}
+
+fn game_arrow_update_system(
+    mut commands: Commands,
+    mut game_state: ResMut<GameState>,
+    mut arrows: Query<(Entity, &mut RectCollider, &Transform), With<Arrow>>,
+    damage_receivers: Query<(&RectCollider, &DamageReceiver), Without<Arrow>>,
+    archers_player: Query<&ArcherPlayer>,
+    archers_enemy: Query<&ArcherEnemy>,
+) {
+    if !(game_state.stage == GameStage::Playing && game_state.waiting_for_hit)
+        || game_state.needs_refresh
+    {
+        return;
+    }
+
+    let mut arrow_out_of_bounds = false;
+    let mut hit_archer = false;
+    let mut killed_archer = false;
+    let mut winner = GameTurn::Player;
+    for (arrow_entity, mut arrow_collider, arrow_transform) in arrows.iter_mut() {
+        let arrow_pos = arrow_transform.translation.truncate();
+
+        for (damage_collider, damage_receiver) in damage_receivers.iter() {
+            if arrow_collider.owner == damage_collider.owner {
+                continue;
+            }
+
+            if arrow_collider.aabb_collides_with(damage_collider) {
+                if let Some(collider_owner) = damage_collider.owner {
+                    if archers_player.get(collider_owner).is_ok() {
+                        commands.entity(arrow_entity).despawn_recursive();
+                        arrow_collider.disable();
+                        hit_archer = true;
+
+                        game_state.player_health -= damage_receiver.hitpoints;
+                        if game_state.player_health <= 0 {
+                            game_state.player_health = 0;
+
+                            killed_archer = true;
+                            winner = GameTurn::Enemy;
+                        }
+                    }
+
+                    if archers_enemy.get(collider_owner).is_ok() {
+                        commands.entity(arrow_entity).despawn_recursive();
+                        arrow_collider.disable();
+                        hit_archer = true;
+
+                        game_state.enemy_health -= damage_receiver.hitpoints;
+                        if game_state.enemy_health <= 0 {
+                            game_state.enemy_health = 0;
+
+                            killed_archer = true;
+                            winner = GameTurn::Enemy;
+                        }
+                    }
+                }
+            }
+        }
+
+        if arrow_pos.x > 15.0 || arrow_pos.x < -15.0 || arrow_pos.y > 15.0 || arrow_pos.y < -15.0 {
+            commands.entity(arrow_entity).despawn_recursive();
+            arrow_collider.disable();
+
+            arrow_out_of_bounds = true;
+            break;
+        }
+    }
+
+    if killed_archer {
+        game_state.stage = GameStage::Finished(winner);
+        game_state.needs_refresh = true;
+        return;
+    }
+
+    if arrow_out_of_bounds || hit_archer {
+        game_state.stage = GameStage::ChangeTurn;
+        game_state.needs_refresh = true;
     }
 }

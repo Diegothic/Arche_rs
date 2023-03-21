@@ -1,15 +1,11 @@
 use std::f32::consts::PI;
 
-use rand::prelude::*;
-
 use bevy::{prelude::*, sprite::Anchor};
-
-use crate::game::eval_shot;
 
 use super::{
     ai_controls::AIControls, animation::Animation, animation::AnimationMode, arrow::Arrow,
-    collision::RectCollider, player_controls::PlayerControls, GameStageSpawned, GameState,
-    GameTextures, ROT_AXIS_Z,
+    collision::RectCollider, player_controls::PlayerControls, GameStage, GameStageSpawned,
+    GameState, GameTextures, GameTurn, ROT_AXIS_Z,
 };
 
 pub struct ArcherPlugin;
@@ -18,7 +14,7 @@ impl Plugin for ArcherPlugin {
     fn build(&self, app: &mut App) {
         app.add_system(player_archer_update_system)
             .add_system(enemy_archer_update_system)
-            .add_system(shoot_ai_update_system)
+            .add_system(shoot_ai_update_system.after(enemy_archer_update_system))
             .add_system(archers_visibility_update_system)
             .add_system(archers_look_at_target_update_system)
             .add_system(archers_react_to_pull_update_system)
@@ -89,7 +85,6 @@ struct ShootAI {
     power: f32,
     time: f32,
     current_time: f32,
-    ready: bool,
 }
 
 #[derive(Component)]
@@ -106,8 +101,8 @@ struct ArrowTrajectoryPoint;
 struct ArrowTrajectoryReceiver;
 
 #[derive(Component)]
-struct DamageReceiver {
-    hitpoints: i32,
+pub struct DamageReceiver {
+    pub hitpoints: i32,
 }
 
 pub fn spawn_archer(
@@ -316,12 +311,12 @@ pub fn spawn_archer(
 }
 
 fn player_archer_update_system(
-    game_state: Res<GameState>,
+    mut game_state: ResMut<GameState>,
     mut player_controls: ResMut<PlayerControls>,
     mut archers: Query<&mut Archer, With<ArcherPlayer>>,
 ) {
     for mut archer in archers.iter_mut() {
-        if !player_controls.enabled() {
+        if game_state.waiting_for_hit || !player_controls.enabled() {
             archer.is_active = false;
             archer.is_combat = false;
             continue;
@@ -346,27 +341,19 @@ fn player_archer_update_system(
             };
             archer.pull_power = pull;
 
-            let eval = eval_shot(
-                archer.pull_power,
-                archer.pull_angle,
-                game_state.player_height,
-                game_state.enemy_height,
-            );
-            let color = Color::Rgba {
-                red: 1.0 - eval,
-                green: 1.0,
-                blue: 1.0 - eval,
-                alpha: 1.0,
-            };
-
             player_controls.set_indicator_color(if angle_out_of_bounds {
                 Color::RED
             } else {
-                color
+                Color::WHITE
             });
         }
 
         if player_controls.should_shoot_arrow() && archer.pull_power > 0.0 {
+            if game_state.stage == GameStage::Playing {
+                game_state.waiting_for_hit = true;
+                player_controls.set_enabled(false);
+            }
+
             archer.shoot_arrow = true;
             player_controls.reset_shooting();
         }
@@ -375,40 +362,49 @@ fn player_archer_update_system(
 
 fn enemy_archer_update_system(
     mut commands: Commands,
-    keyboard: Res<Input<KeyCode>>,
     game_state: Res<GameState>,
     mut ai_controls: ResMut<AIControls>,
     mut archers: Query<(Entity, &mut Archer), With<ArcherEnemy>>,
 ) {
+    if !ai_controls.enabled() {
+        return;
+    }
+
     for (entity, mut archer) in archers.iter_mut() {
-        if keyboard.just_pressed(KeyCode::S) {
-            archer.is_active = true;
-            archer.is_combat = true;
-
-            //let angle = f32::to_radians(rand::thread_rng().gen_range(-80.0..=80.0));
-            //let pull = rand::thread_rng().gen_range(0.0..=1.0);
-            ai_controls.think(&game_state);
-            let angle = ai_controls.get_pull_angle();
-            let pull = ai_controls.get_pull_power();
-
-            commands.entity(entity).remove::<ShootAI>();
-            commands.entity(entity).insert(ShootAI {
-                angle,
-                power: pull,
-                time: 1.0,
-                current_time: 0.0,
-                ready: false,
-            });
+        if game_state.waiting_for_hit
+            || game_state.turn != GameTurn::Enemy
+            || game_state.stage != GameStage::Playing
+        {
+            break;
         }
+
+        ai_controls.set_enabled(false);
+
+        archer.is_active = true;
+        archer.is_combat = true;
+
+        ai_controls.think(&game_state);
+        let angle = ai_controls.get_pull_angle();
+        let pull = ai_controls.get_pull_power();
+
+        commands.entity(entity).remove::<ShootAI>();
+        commands.entity(entity).insert(ShootAI {
+            angle,
+            power: pull,
+            time: 1.0,
+            current_time: 0.0,
+        });
     }
 }
 
 fn shoot_ai_update_system(
     mut commands: Commands,
+    mut game_state: ResMut<GameState>,
     time: Res<Time>,
     mut archers: Query<(Entity, &mut ShootAI, &mut Archer), With<ArcherEnemy>>,
 ) {
     for (entity, mut shoot_ai, mut archer) in archers.iter_mut() {
+        game_state.waiting_for_hit = true;
         shoot_ai.current_time += time.delta_seconds();
 
         if shoot_ai.current_time > shoot_ai.time {
