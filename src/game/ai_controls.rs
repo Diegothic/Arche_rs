@@ -1,7 +1,15 @@
 use bevy::prelude::*;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
+use std::{env, fs};
 
-use super::{eval_shot, GameState};
+use super::{arrow::Arrow, collision::RectCollider, GameState};
+
+const POP_SIZE: usize = 1024;
+const LEARNING_RATE: f32 = 0.5;
+const GENERATIONS: u32 = 100;
+
+const NET_FILE_PATH: &str = "/assets/ai/net.txt";
 
 pub struct AIControlsPlugin;
 
@@ -21,12 +29,26 @@ pub struct AIControls {
 
 impl AIControls {
     fn new() -> Self {
-        let mut genetic_algorithm = GeneticAlgorithm::new(1024, 0.5);
-        let best_net = genetic_algorithm.get_best(100);
+        let net: NeuralNetwork;
+
+        let path = env::current_dir().unwrap();
+        let mut full_path: String = path.to_str().unwrap().into();
+        full_path.push_str(NET_FILE_PATH);
+
+        if let Ok(serialized_net) = fs::read_to_string(&full_path) {
+            net = serde_json::from_str(&serialized_net).expect("Failed to deserialize net!");
+        } else {
+            let mut genetic_algorithm = GeneticAlgorithm::new(POP_SIZE, LEARNING_RATE);
+            let best_net = genetic_algorithm.get_best(GENERATIONS);
+            let serialized_net =
+                serde_json::to_string(&best_net).expect("Failed to serialize net!");
+            fs::write(&full_path, &serialized_net).unwrap();
+            net = best_net;
+        }
 
         Self {
             is_enabled: false,
-            net: best_net,
+            net,
             pull_power: 0.0,
             pull_angle: 0.0,
         }
@@ -56,7 +78,7 @@ impl AIControls {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct NeuralNetwork {
     weights: Vec<Vec<Vec<f32>>>,
     biases: Vec<Vec<f32>>,
@@ -162,12 +184,62 @@ impl NeuralNetwork {
                 let h_other = j as f32 * 0.1;
                 let input = vec![h_self, h_other];
                 let output = self.calculate_output(input);
-                let shot_score = eval_shot(output[0], output[1], h_self, h_other);
+                let shot_score = NeuralNetwork::eval_shot(output[0], output[1], h_self, h_other);
                 score += shot_score;
             }
         }
 
         score
+    }
+
+    pub fn eval_shot(power: f32, angle: f32, self_height: f32, enemy_height: f32) -> i32 {
+        let self_height_real = (self_height * 12.0) - (17.0 * 0.5) + 1.0;
+        let enemy_height_real = (enemy_height * 12.0) - (17.0 * 0.5) + 1.0;
+
+        let shooting_vec = Vec2::new(f32::cos(angle), f32::sin(angle)) * 2.55;
+        let mut shoot_pos = Vec2::new(-12.0, self_height_real);
+        shoot_pos += Vec2::new(0.3, 2.1);
+        shoot_pos += shooting_vec;
+
+        let mut arrow_col = RectCollider::new(None, Vec2::ZERO, 0.3, 0.3);
+        arrow_col.set_center(shoot_pos);
+
+        let enemy_pos = Vec2::new(12.0, enemy_height_real);
+        let mut enemy_legs_col = RectCollider::new(None, Vec2::ZERO, 0.8, 1.2);
+        let enemy_legs_pos = enemy_pos + Vec2::new(0.0, 0.7);
+        enemy_legs_col.set_center(enemy_legs_pos);
+
+        let mut enemy_body_col = RectCollider::new(None, Vec2::ZERO, 0.8, 1.0);
+        let enemy_body_pos = enemy_pos + Vec2::new(0.0, 1.9);
+        enemy_body_col.set_center(enemy_body_pos);
+
+        let mut enemy_head_col = RectCollider::new(None, Vec2::ZERO, 0.7, 0.7);
+        let enemy_head_pos = enemy_pos + Vec2::new(0.0, 2.8);
+        enemy_head_col.set_center(enemy_head_pos);
+
+        let mut t = 0.0;
+        loop {
+            let arrow_pos = Arrow::get_trajectory(power * 10.0, angle, t);
+            let arrow_col_pos = shoot_pos + arrow_pos;
+            arrow_col.set_center(arrow_col_pos);
+            if arrow_col.aabb_collides_with(&enemy_head_col) {
+                return 100;
+            }
+
+            if arrow_col.aabb_collides_with(&enemy_body_col) {
+                return 50;
+            }
+
+            if arrow_col.aabb_collides_with(&enemy_legs_col) {
+                return 30;
+            }
+
+            if arrow_col_pos.x > 12.0 || arrow_col_pos.y > 12.0 || arrow_col_pos.y < -12.0 {
+                return 0;
+            }
+
+            t += 0.01;
+        }
     }
 }
 
