@@ -1,11 +1,12 @@
 use std::f32::consts::PI;
 
 use bevy::{prelude::*, sprite::Anchor};
+use rand::Rng;
 
 use super::{
     ai_controls::AIControls, animation::Animation, animation::AnimationMode, arrow::Arrow,
     collision::RectCollider, player_controls::PlayerControls, GameStage, GameStageSpawned,
-    GameState, GameTextures, GameTurn, ROT_AXIS_Z,
+    GameState, GameTextures, GameTurn, DIFFICULTY, ROT_AXIS_Z,
 };
 
 pub struct ArcherPlugin;
@@ -384,8 +385,11 @@ fn enemy_archer_update_system(
         archer.is_combat = true;
 
         ai_controls.think(&game_state);
-        let angle = ai_controls.get_pull_angle();
-        let pull = ai_controls.get_pull_power();
+        let mut angle = ai_controls.get_pull_angle();
+        let mut pull = ai_controls.get_pull_power();
+
+        angle += rand::thread_rng().gen_range(-1.0..=1.0) * (1.0 - DIFFICULTY) * 0.1;
+        pull += rand::thread_rng().gen_range(-1.0..=1.0) * (1.0 - DIFFICULTY) * 0.1;
 
         commands.entity(entity).remove::<ShootAI>();
         commands.entity(entity).insert(ShootAI {
